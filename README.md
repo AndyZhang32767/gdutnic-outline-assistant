@@ -5,14 +5,12 @@
 ## 运行环境
 
 - Python 3.10+（建议 3.12）
-- 能访问网协wiki的 Outline 知识库
+- 能访问网协wiki的 MCP 知识库的网络环境
 - 任意一家兼容 OpenAI Chat Completions 的模型 Key
 
 ## 启动
 
 本机或局域网访问：<http://127.0.0.1:8787> 或 `http://本机IP:8787`。  
-企业登录必须用 **127.0.0.1**（不要用 `localhost`），否则 OAuth 回调可能失败。从其他电脑用 IP 访问时，需要在 Outline 侧允许对应回调地址。
-
 **Windows**
 
 ```bat
