@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#186078" />
+    <title>Wiki 查询助手</title>
+    <link rel="icon" type="image/png" href="/icon/gdutnic.png" />
+    <link rel="apple-touch-icon" href="/icon/gdutnic.png" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260831n" />
+  </head>
+  <body>
+    <div class="app">
+      <aside class="panel">
+        <header class="brand">
+          <div class="mark"><img src="/icon/gdutnic.png" alt="" /></div>
+          <div>
+            <h1>GDUTNIC Wiki 查询助手</h1>
+            <p>知识库 MCP</p>
+          </div>
+        </header>
+
+        <section class="card">
+          <h2>知识库 MCP</h2>
+          <label>
+            企业 Outline / MCP 地址
+            <input id="mcpUrl" spellcheck="false" placeholder="https://知识库域名 或 https://知识库域名/mcp" />
+          </label>
+          <label>
+            Outline API Key（可选）
+            <input id="mcpKey" type="password" placeholder="一般不用填，优先用弹窗登录" />
+          </label>
+          <div class="row">
+            <button type="button" id="btnOauth" class="btn primary">企业登录</button>
+            <button type="button" id="btnConnect" class="btn tonal">测试连接</button>
+          </div>
+          <p class="hint login-hint">点击「企业登录」会弹出窗口进行登陆</p>
+          <div id="mcpStatus" class="status idle">未连接</div>
+        </section>
+
+        <section class="card">
+          <h2>模型接口</h2>
+          <label>
+            厂商
+            <select id="provider"></select>
+          </label>
+          <label>
+            Base URL
+            <input id="openaiBase" spellcheck="false" placeholder="由厂商自动填入，可改" />
+          </label>
+          <label>
+            API Key
+            <input id="openaiKey" type="password" placeholder="选择厂商后填入对应 Key" />
+          </label>
+          <label id="modelSelectWrap">
+            模型
+            <select id="openaiModelSelect"></select>
+          </label>
+          <label id="customModelWrap" hidden>
+            模型名称
+            <input id="openaiModel" spellcheck="false" placeholder="请填写模型名称" />
+          </label>
+          <p class="hint" id="providerHint">选择厂商后会填入兼容 OpenAI 的接口地址，再填该厂商的 API Key。</p>
+        </section>
+      </aside>
+
+      <main class="chat">
+        <header class="chat-bar" id="chatBar">
+          <div>
+            <strong>向知识库提问</strong>
+            <p>答案会自动排版标题、链接与表格</p>
+          </div>
+          <button type="button" id="btnClear" class="btn ghost small">清空对话</button>
+        </header>
+        <div id="thread" class="thread"></div>
+        <div class="composer-dock" id="composerDock">
+          <div class="composer-blur" aria-hidden="true"></div>
+          <form id="composer" class="composer">
+            <textarea id="input" rows="1" placeholder="向知识库提问…"></textarea>
+            <button type="submit" id="btnSend" class="btn primary send" aria-label="发送">发送</button>
+          </form>
+        </div>
+      </main>
+    </div>
+    <script src="/static/app.js?v=20260831n"></script>
+  </body>
+</html>
