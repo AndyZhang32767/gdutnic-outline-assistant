@@ -1,11 +1,11 @@
-# Outline 查询助手
+# 网协 Wili 查询助手
 
-本机运行的知识库问答助手：通过企业 Outline 的 MCP 检索文档，再用兼容 OpenAI 的模型接口生成回答。界面在浏览器里打开，登录走弹出窗口（OAuth）。
+给泥工网协做的 Wiki Agent, 通过 MCP 检索文档，再用兼容 OpenAI 的模型接口生成回答。界面在浏览器里打开，登录走弹出窗口（OAuth）。
 
 ## 运行环境
 
 - Python 3.10+（建议 3.12）
-- 能访问你们自己的 Outline 知识库（不要用 getoutline.com）
+- 能访问网协wiki的 Outline 知识库
 - 任意一家兼容 OpenAI Chat Completions 的模型 Key
 
 ## 启动
