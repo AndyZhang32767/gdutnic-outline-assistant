@@ -59,5 +59,4 @@ start.sh    Linux / macOS 启动
 
 ## 开源协议
 
-本项目采用 [MIT License](LICENSE)。学生社团项目用 MIT 最合适：协议短、门槛低，学弟学妹可以继续改，其他学校网协也可以拿去自建，不强制衍生项目必须开源。
-
+本项目采用 [MIT License](LICENSE)
