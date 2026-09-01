@@ -1,145 +1,327 @@
-const STORAGE_KEY = "gdutnic-outline-assistant";
+const ICON_FILES = {
+  compose: "/icon/symbol/new_window_24dp_1F1F1F_FILL0_wght400_GRAD0_opsz24.svg",
+  close: "/icon/symbol/close_24dp_1F1F1F_FILL0_wght400_GRAD0_opsz24.svg",
+  send: "/icon/symbol/send_24dp_1F1F1F_FILL0_wght400_GRAD0_opsz24.svg",
+  stop: "/icon/symbol/stop_24dp_1F1F1F_FILL0_wght400_GRAD0_opsz24.svg",
+  user: "/icon/symbol/user_24dp_1F1F1F_FILL0_wght400_GRAD0_opsz24.svg",
+  server: "/icon/symbol/server_24dp_1F1F1F_FILL0_wght400_GRAD0_opsz24.svg",
+};
 
-const PROVIDERS = [
-  {
-    id: "openai",
-    name: "OpenAI",
-    base: "https://api.openai.com/v1",
-    keyHint: "sk-...",
-    models: ["gpt-5.6", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
-    hint: "官方 OpenAI Chat Completions。gpt-5.6 会路由到 gpt-5.6-sol。",
-  },
-  {
-    id: "gemini",
-    name: "Google Gemini",
-    base: "https://generativelanguage.googleapis.com/v1beta/openai",
-    keyHint: "AIza...",
-    models: ["gemini-3.7-flash", "gemini-3.5-flash", "gemini-3.1-pro-preview"],
-    hint: "Gemini 的 OpenAI 兼容接口。",
-  },
-  {
-    id: "grok",
-    name: "xAI Grok",
-    base: "https://api.x.ai/v1",
-    keyHint: "xai-...",
-    models: ["grok-4.6", "grok-4.5", "grok-4.3"],
-    hint: "xAI 控制台申请的 Grok API Key。",
-  },
-  {
-    id: "deepseek",
-    name: "DeepSeek",
-    base: "https://api.deepseek.com",
-    keyHint: "sk-...",
-    models: ["deepseek-v4-flash", "deepseek-v4-pro"],
-    hint: "DeepSeek 官方 OpenAI 兼容接口。",
-  },
-  {
-    id: "qwen",
-    name: "通义千问",
-    base: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-    keyHint: "sk-...",
-    models: ["qwen3.7-plus", "qwen3.7-max", "qwen-plus", "qwen-flash", "qwen-max"],
-    hint: "阿里云百炼 compatible-mode。",
-  },
-  {
-    id: "moonshot",
-    name: "Moonshot / Kimi",
-    base: "https://api.moonshot.cn/v1",
-    keyHint: "sk-...",
-    models: ["kimi-k3", "kimi-k2.6", "kimi-k2.7-code", "kimi-k2.7-code-highspeed"],
-    hint: "Kimi 开放平台。kimi-k2 / moonshot-v1 已下线。",
-  },
-  {
-    id: "zhipu",
-    name: "智谱 GLM",
-    base: "https://open.bigmodel.cn/api/paas/v4",
-    keyHint: "API Key",
-    models: ["glm-5.3", "glm-5.3-flash", "glm-5.2", "glm-4.7", "glm-4.7-flash"],
-    hint: "智谱开放平台，路径已含 v4。",
-  },
-  {
-    id: "siliconflow",
-    name: "硅基流动",
-    base: "https://api.siliconflow.cn/v1",
-    keyHint: "sk-...",
-    models: [
-      "deepseek-ai/DeepSeek-V4-Pro",
-      "deepseek-ai/DeepSeek-V4-Flash",
-      "Qwen/Qwen3.5-397B-A17B",
-      "Qwen/Qwen3-32B",
-    ],
-    hint: "国内常用中转，模型名需带组织前缀。",
-  },
-  {
-    id: "doubao",
-    name: "火山方舟 Doubao",
-    base: "https://ark.cn-beijing.volces.com/api/v3",
-    keyHint: "方舟 API Key",
-    models: ["doubao-seed-2.1-pro", "doubao-seed-2.1-turbo"],
-    hint: "也可在厂商「自定义」中填写方舟接入点 ID（ep-...）。",
-  },
-  {
-    id: "ollama",
-    name: "Ollama（本地）",
-    base: "http://127.0.0.1:11434/v1",
-    keyHint: "可填 ollama",
-    models: ["llama3.2", "qwen3", "deepseek-r1"],
-    hint: "本机 Ollama，Key 可填任意非空值。需先 ollama pull 对应模型。",
-  },
-  {
-    id: "custom",
-    name: "自定义",
-    base: "",
-    keyHint: "sk-...",
-    models: [],
-    hint: "任意兼容 /chat/completions 的网关，自行填写 Base URL 和模型名。",
-  },
-];
+function mdIcon(name) {
+  return `<span class="md-icon" style="--md-icon:url('${ICON_FILES[name]}')" aria-hidden="true"></span>`;
+}
+
+const ICON = {
+  compose: mdIcon("compose"),
+  close: mdIcon("close"),
+  send: mdIcon("send"),
+  stop: mdIcon("stop"),
+};
+const HISTORY_KEY = "gdutnic-chat-history";
+const AUTH_KEY = "gdutnic-wiki-auth";
 
 const els = {
-  mcpUrl: document.getElementById("mcpUrl"),
-  mcpKey: document.getElementById("mcpKey"),
-  provider: document.getElementById("provider"),
-  openaiBase: document.getElementById("openaiBase"),
-  openaiKey: document.getElementById("openaiKey"),
-  openaiModelSelect: document.getElementById("openaiModelSelect"),
-  openaiModel: document.getElementById("openaiModel"),
-  modelSelectWrap: document.getElementById("modelSelectWrap"),
-  customModelWrap: document.getElementById("customModelWrap"),
-  providerHint: document.getElementById("providerHint"),
-  mcpStatus: document.getElementById("mcpStatus"),
+  wikiGate: document.getElementById("wikiGate"),
+  app: document.getElementById("app"),
+  gateStatus: document.getElementById("gateStatus"),
+  historyList: document.getElementById("historyList"),
   thread: document.getElementById("thread"),
   input: document.getElementById("input"),
   form: document.getElementById("composer"),
   composerDock: document.getElementById("composerDock"),
-  btnConnect: document.getElementById("btnConnect"),
   btnOauth: document.getElementById("btnOauth"),
-  btnClear: document.getElementById("btnClear"),
+  btnNewSession: document.getElementById("btnNewSession"),
+  btnLogout: document.getElementById("btnLogout"),
   btnSend: document.getElementById("btnSend"),
   chatBar: document.getElementById("chatBar"),
+  chatTitle: document.getElementById("chatTitle"),
 };
 
 let messages = [];
-let conversationEpoch = 0;
-let keysByProvider = {};
-let chatAbort = null;
 let programmaticScroll = false;
 let headerFadeTimer = 0;
+let currentId = null;
+let sessions = [];
+const inflight = new Map();
 
-function startNewConversation() {
-  conversationEpoch += 1;
-  if (chatAbort) {
-    chatAbort.abort();
-    chatAbort = null;
+function newId() {
+  return crypto.randomUUID();
+}
+
+function loadAuth() {
+  try {
+    return JSON.parse(localStorage.getItem(AUTH_KEY) || "null");
+  } catch {
+    return null;
   }
-  messages = [];
-  if (els.thread) els.thread.innerHTML = "";
-  setSending(false);
+}
+
+function saveAuth(data) {
+  const access = (data?.access_token || "").trim();
+  if (!access) return;
+  localStorage.setItem(
+    AUTH_KEY,
+    JSON.stringify({
+      access_token: access,
+      refresh_token: data.refresh_token || "",
+      mcp_url: data.mcp_url || "",
+    })
+  );
+}
+
+function authScope() {
+  const token = loadAuth()?.access_token || "";
+  let h = 0;
+  for (let i = 0; i < token.length; i += 1) {
+    h = (Math.imul(31, h) + token.charCodeAt(i)) | 0;
+  }
+  return String(h);
+}
+
+function historyStorageKey() {
+  return `${HISTORY_KEY}:${authScope()}`;
+}
+
+const THEME_COOKIE = "gdutnic_themes";
+let saveChatsTimer = 0;
+
+function readThemeCookie() {
+  const hit = document.cookie.split("; ").find((row) => xStarts(row, THEME_COOKIE + "="));
+  if (!hit) return {};
+  try {
+    const parsed = JSON.parse(decodeURIComponent(hit.slice(THEME_COOKIE.length + 1)));
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function xStarts(row, prefix) {
+  return row.startsWith(prefix);
+}
+
+function writeThemeCookie(map) {
+  document.cookie = `${THEME_COOKIE}=${encodeURIComponent(JSON.stringify(map))}; Path=/; Max-Age=${60 * 60 * 24 * 30}; SameSite=Lax`;
+}
+
+function themeIndex(theme) {
+  const i = USER_THEMES.findIndex((t) => t.bg === theme.bg && t.ink === theme.ink);
+  return i >= 0 ? i : 0;
+}
+
+function themeFromCookie(id) {
+  const idx = readThemeCookie()[id];
+  if (Number.isInteger(idx) && USER_THEMES[idx]) return { ...USER_THEMES[idx] };
+  return null;
+}
+
+function rememberThemeCookie(id, theme) {
+  if (!id || !theme) return;
+  const map = readThemeCookie();
+  map[id] = themeIndex(theme);
+  writeThemeCookie(map);
+}
+
+async function loadHistoryStore() {
+  try {
+    const res = await fetch("/api/chats");
+    const packed = await res.json();
+    if (res.ok && Array.isArray(packed.sessions)) {
+      sessions = packed.sessions;
+      currentId = packed.currentId || null;
+      if (sessions.length) return;
+    }
+  } catch {
+    /* fall through */
+  }
+  try {
+    const scoped = JSON.parse(localStorage.getItem(historyStorageKey()) || "null");
+    if (scoped && Array.isArray(scoped.sessions) && scoped.sessions.length) {
+      sessions = scoped.sessions;
+      currentId = scoped.currentId || null;
+      persistHistoryStore();
+      return;
+    }
+    const legacy = JSON.parse(localStorage.getItem(HISTORY_KEY) || "{}");
+    sessions = Array.isArray(legacy.sessions) ? legacy.sessions : [];
+    currentId = legacy.currentId || null;
+  } catch {
+    sessions = [];
+    currentId = null;
+  }
+}
+
+function persistHistoryStore(immediate) {
+  sessions.forEach((s) => {
+    if (s.userTheme) rememberThemeCookie(s.id, s.userTheme);
+  });
+  const push = () =>
+    fetch("/api/chats", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ currentId, sessions }),
+    }).catch(() => {});
+  clearTimeout(saveChatsTimer);
+  if (immediate === false) {
+    saveChatsTimer = setTimeout(push, 280);
+    return;
+  }
+  push();
+}
+
+function sessionTitleFrom(msgs) {
+  const first = (msgs || []).find((m) => m.role === "user");
+  const text = String(first?.content || "新会话").replace(/\s+/g, " ").trim();
+  return text.slice(0, 36) || "新会话";
+}
+
+const USER_THEMES = [
+  { bg: "#D1E4FF", ink: "#001D33" },
+  { bg: "#DCF8C6", ink: "#102008" },
+  { bg: "#FFDCC8", ink: "#311300" },
+  { bg: "#E8DEF8", ink: "#1D192B" },
+  { bg: "#E6E1E5", ink: "#1C1B1F" },
+];
+
+function pickUserTheme() {
+  return USER_THEMES[Math.floor(Math.random() * USER_THEMES.length)];
+}
+
+function applyUserChatTheme(theme) {
+  const t = theme && theme.bg && theme.ink ? theme : pickUserTheme();
+  document.documentElement.style.setProperty("--user-bubble", t.bg);
+  document.documentElement.style.setProperty("--user-ink", t.ink);
+}
+
+function sortSessions() {
+  sessions.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+}
+
+function ensureSession(id) {
+  let rec = sessions.find((s) => s.id === id);
+  if (!rec) {
+    rec = { id, title: "新会话", messages: [], updatedAt: 0 };
+    sessions.push(rec);
+  }
+  if (!Array.isArray(rec.messages)) rec.messages = [];
+  const fromCookie = themeFromCookie(id);
+  if (fromCookie) {
+    rec.userTheme = fromCookie;
+  } else if (!rec.userTheme || !rec.userTheme.bg || !rec.userTheme.ink) {
+    rec.userTheme = pickUserTheme();
+  }
+  rememberThemeCookie(id, rec.userTheme);
+  return rec;
+}
+
+function bindCurrent(id) {
+  const rec = ensureSession(id);
+  currentId = id;
+  messages = rec.messages;
+  applyUserChatTheme(rec.userTheme);
+  persistHistoryStore();
+  syncHistoryActive();
+  renderThreadFromMessages();
+  setSending(inflight.has(id));
+}
+
+function syncHistoryActive() {
+  if (!els.historyList) return;
+  const items = els.historyList.querySelectorAll(".history-item");
+  if (!items.length) {
+    renderHistory();
+    return;
+  }
+  items.forEach((el) => {
+    el.classList.toggle("active", el.dataset.id === currentId);
+  });
+  updateChatTitle();
+}
+
+function markRound(id) {
+  const rec = ensureSession(id);
+  rec.title = sessionTitleFrom(rec.messages);
+  rec.updatedAt = Date.now();
+  sortSessions();
+  persistHistoryStore();
+  renderHistory();
+}
+
+function updateChatTitle() {
+  if (!els.chatTitle) return;
+  const rec = sessions.find((s) => s.id === currentId);
+  els.chatTitle.textContent = rec?.title || "新会话";
+}
+
+function renderHistory() {
+  if (!els.historyList) return;
+  const saved = [...sessions]
+    .filter((s) => (s.messages || []).length)
+    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  if (!saved.length) {
+    els.historyList.innerHTML = '<p class="history-empty">暂无历史会话</p>';
+    updateChatTitle();
+    return;
+  }
+  els.historyList.innerHTML = saved
+    .map(
+      (s) =>
+        `<div class="history-item${s.id === currentId ? " active" : ""}" data-id="${s.id}">` +
+        `<button type="button" class="history-open" data-id="${s.id}">${escapeHtml(s.title || "新会话")}</button>` +
+        `<button type="button" class="history-del" data-del="${s.id}" title="删除" aria-label="删除">${ICON.close}</button>` +
+        `</div>`
+    )
+    .join("");
+  updateChatTitle();
+}
+
+function renderThreadFromMessages() {
+  if (!els.thread) return;
+  els.thread.innerHTML = "";
+  for (const m of messages) {
+    if (m.role !== "user" && m.role !== "assistant") continue;
+    addMessage(m.role, m.content, "", { scroll: false });
+  }
+  if (inflight.has(currentId)) {
+    const last = messages[messages.length - 1];
+    if (!last || last.role !== "assistant") {
+      const thinkingChip = document.createElement("div");
+      thinkingChip.className = "thinking-chip";
+      thinkingChip.dataset.thinking = currentId;
+      thinkingChip.innerHTML = '<span class="thinking-spinner" aria-hidden="true"></span><span>思考中...</span>';
+      els.thread.appendChild(thinkingChip);
+    }
+  }
+  scrollThreadToBottom();
   updateComposerChrome();
 }
 
-function isCurrentConversation(epoch) {
-  return epoch === conversationEpoch;
+function startNewConversation() {
+  if (!messages.length && !inflight.has(currentId)) {
+    if (!currentId) currentId = newId();
+    persistHistoryStore();
+    renderHistory();
+    renderThreadFromMessages();
+    return;
+  }
+  bindCurrent(newId());
+}
+
+function openSession(id) {
+  if (!id || id === currentId) return;
+  bindCurrent(id);
+}
+
+function deleteSession(id) {
+  const ctrl = inflight.get(id);
+  if (ctrl) ctrl.abort();
+  sessions = sessions.filter((s) => s.id !== id);
+  if (currentId === id) {
+    bindCurrent(newId());
+    return;
+  }
+  persistHistoryStore();
+  renderHistory();
 }
 
 function setSending(on) {
@@ -147,9 +329,9 @@ function setSending(on) {
   els.btnSend.classList.toggle("stop", on);
   els.btnSend.setAttribute("aria-label", on ? "中止" : "发送");
   if (on) {
-    els.btnSend.innerHTML = '<span class="thinking-spinner" aria-hidden="true"></span>';
+    els.btnSend.innerHTML = ICON.stop;
   } else {
-    els.btnSend.textContent = "发送";
+    els.btnSend.innerHTML = ICON.send;
   }
 }
 
@@ -165,8 +347,9 @@ function scrollThreadToBottom() {
 
 function attachRipple() {
   document.addEventListener("pointerdown", (event) => {
-    const btn = event.target.closest(".btn");
-    if (!btn) return;
+    const capsule = event.target.closest(".history-item");
+    const btn = capsule || event.target.closest(".btn");
+    if (!btn || btn.classList.contains("send")) return;
     const rect = btn.getBoundingClientRect();
     const size = Math.max(rect.width, rect.height) * 2.2;
     const ripple = document.createElement("span");
@@ -180,157 +363,95 @@ function attachRipple() {
   });
 }
 
-function loadSettings() {
-  try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
-  } catch {
-    return {};
-  }
-}
-
-function currentProvider() {
-  return PROVIDERS.find((p) => p.id === els.provider.value) || PROVIDERS[0];
-}
-
-function selectedModel() {
-  if (currentProvider().id === "custom") {
-    return els.openaiModel.value.trim();
-  }
-  return els.openaiModelSelect.value;
-}
-
-function saveSettings() {
-  keysByProvider[els.provider.value] = els.openaiKey.value;
-  localStorage.setItem(
-    STORAGE_KEY,
-    JSON.stringify({
-      mcpUrl: els.mcpUrl.value.trim(),
-      provider: els.provider.value,
-      openaiBase: els.openaiBase.value.trim(),
-      openaiKey: els.openaiKey.value,
-      openaiModel: selectedModel(),
-      keysByProvider,
-    })
-  );
-}
-
-function enhanceSelect(select) {
-  if (select.dataset.enhanced === "1") {
-    refreshSelectMenu(select);
-    return;
-  }
-  select.dataset.enhanced = "1";
-  const wrap = document.createElement("div");
-  wrap.className = "md-select";
-  select.parentNode.insertBefore(wrap, select);
-  wrap.appendChild(select);
-  select.classList.add("md-select-native");
-  const btn = document.createElement("button");
-  btn.type = "button";
-  btn.className = "md-select-btn";
-  const menu = document.createElement("div");
-  menu.className = "md-select-menu";
-  wrap.append(btn, menu);
-  select._mdWrap = wrap;
-  select._mdBtn = btn;
-  select._mdMenu = menu;
-  btn.addEventListener("click", (event) => {
-    event.preventDefault();
-    document.querySelectorAll(".md-select.open").forEach((el) => {
-      if (el !== wrap) el.classList.remove("open");
-    });
-    wrap.classList.toggle("open");
-  });
-  menu.addEventListener("click", (event) => {
-    const opt = event.target.closest(".md-select-option");
-    if (!opt) return;
-    select.value = opt.dataset.value;
-    select.dispatchEvent(new Event("change", { bubbles: true }));
-    wrap.classList.remove("open");
-    refreshSelectMenu(select);
-  });
-  refreshSelectMenu(select);
-}
-
-function refreshSelectMenu(select) {
-  if (!select._mdBtn) return;
-  const current = select.options[select.selectedIndex];
-  select._mdBtn.textContent = current ? current.text : "";
-  select._mdMenu.innerHTML = [...select.options]
-    .map(
-      (opt) =>
-        `<button type="button" class="md-select-option${opt.selected ? " selected" : ""}" data-value="${opt.value}">${opt.text}</button>`
-    )
-    .join("");
-}
-
-function fillProviderSelect() {
-  els.provider.innerHTML = PROVIDERS.map(
-    (p) => `<option value="${p.id}">${p.name}</option>`
-  ).join("");
-  enhanceSelect(els.provider);
-}
-
-function fillModelSelect(provider, savedModel) {
-  const models = provider.models || [];
-  els.openaiModelSelect.innerHTML = models.map((m) => `<option value="${m}">${m}</option>`).join("");
-  if (savedModel && models.includes(savedModel)) {
-    els.openaiModelSelect.value = savedModel;
-  } else if (models.length) {
-    els.openaiModelSelect.value = models[0];
-  }
-  syncModelFields();
-  refreshSelectMenu(els.openaiModelSelect);
-}
-
-function syncModelFields() {
-  const custom = currentProvider().id === "custom";
-  els.modelSelectWrap.classList.toggle("field-hidden", custom);
-  els.modelSelectWrap.hidden = custom;
-  els.customModelWrap.classList.toggle("field-hidden", !custom);
-  els.customModelWrap.hidden = !custom;
-}
-
-function applyProvider(provider, { keepBase = false, savedModel = "" } = {}) {
-  els.providerHint.textContent = provider.hint;
-  els.openaiKey.placeholder = provider.keyHint;
-  if (provider.id === "custom") {
-    if (!keepBase) els.openaiBase.value = "";
-    els.openaiBase.placeholder = "https://your-gateway/v1";
-  } else if (!keepBase && provider.base) {
-    els.openaiBase.value = provider.base;
-    els.openaiBase.placeholder = "由厂商自动填入，可改";
-  }
-  fillModelSelect(provider, savedModel);
-  enhanceSelect(els.provider);
-  enhanceSelect(els.openaiModelSelect);
-  refreshSelectMenu(els.provider);
-  refreshSelectMenu(els.openaiModelSelect);
-  syncModelFields();
-  const storedKey = keysByProvider[provider.id];
-  if (typeof storedKey === "string") {
-    els.openaiKey.value = storedKey;
-  }
-}
-
 function setStatus(text, kind) {
-  els.mcpStatus.textContent = text;
-  els.mcpStatus.className = `status ${kind}`;
+  if (els.gateStatus && !document.body.classList.contains("wiki-ready")) {
+    els.gateStatus.textContent = text;
+    els.gateStatus.className = `hint status-text ${kind || ""}`;
+  }
 }
 
-function addMessage(role, text, extraClass) {
-  const node = document.createElement("div");
-  node.className = `msg ${role}${extraClass ? " " + extraClass : ""}`;
-  if (role === "assistant") {
-    node.classList.add("markdown");
-    node.innerHTML = renderMarkdown(text || "");
-  } else {
-    node.textContent = text;
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function clearAuth() {
+  localStorage.removeItem(AUTH_KEY);
+}
+
+async function logoutWiki() {
+  try {
+    await fetch("/api/mcp/logout", { method: "POST" });
+  } catch {
+    /* still leave locally */
   }
-  els.thread.appendChild(node);
-  scrollThreadToBottom();
+  clearAuth();
+  inflight.forEach((ctrl) => ctrl.abort());
+  inflight.clear();
+  setSending(false);
+  showGate();
+  setStatus("", "idle");
+}
+
+function showGate() {
+  document.body.classList.remove("wiki-ready");
+  if (els.app) {
+    els.app.hidden = true;
+    els.app.classList.add("field-hidden");
+  }
+  if (els.wikiGate) {
+    els.wikiGate.hidden = false;
+    els.wikiGate.classList.remove("is-leaving");
+  }
+}
+
+async function showApp() {
+  if (els.wikiGate && !els.wikiGate.hidden) {
+    els.wikiGate.classList.add("is-leaving");
+    await wait(260);
+    els.wikiGate.hidden = true;
+    els.wikiGate.classList.remove("is-leaving");
+  }
+  document.body.classList.add("wiki-ready");
+  if (els.app) {
+    els.app.hidden = false;
+    els.app.classList.remove("field-hidden");
+  }
   updateComposerChrome();
-  return node;
+}
+
+function addMessage(role, text, extraClass, opts) {
+  const bubble = document.createElement("div");
+  bubble.className = `msg ${role}${extraClass ? " " + extraClass : ""}`;
+  if (role === "assistant") {
+    bubble.classList.add("markdown");
+    bubble.innerHTML = renderMarkdown(text || "");
+  } else {
+    bubble.textContent = text;
+  }
+  if (role === "user" || role === "assistant") {
+    const row = document.createElement("div");
+    row.className = `msg-row ${role}`;
+    const avatar = document.createElement("span");
+    avatar.className = "msg-avatar";
+    avatar.setAttribute("aria-hidden", "true");
+    const icon = document.createElement("span");
+    icon.className = "md-icon";
+    icon.style.setProperty("--md-icon", `url('${ICON_FILES[role === "user" ? "user" : "server"]}')`);
+    avatar.appendChild(icon);
+    if (role === "user") {
+      row.append(bubble, avatar);
+    } else {
+      row.append(avatar, bubble);
+    }
+    els.thread.appendChild(row);
+  } else {
+    els.thread.appendChild(bubble);
+  }
+  if (!opts || opts.scroll !== false) {
+    scrollThreadToBottom();
+    updateComposerChrome();
+  }
+  return bubble;
 }
 
 function escapeHtml(text) {
@@ -485,18 +606,38 @@ function errorText(data) {
 }
 
 function payload() {
-  return {
-    mcp_url: els.mcpUrl.value.trim(),
-    mcp_api_key: els.mcpKey.value.trim(),
-    openai_base_url: els.openaiBase.value.trim(),
-    openai_api_key: els.openaiKey.value.trim(),
-    openai_model: selectedModel(),
-    provider: els.provider.value,
-  };
+  const token = (loadAuth()?.access_token || "").trim();
+  return token ? { mcp_api_key: token } : {};
+}
+
+async function restoreServerSession() {
+  const auth = loadAuth();
+  if (!auth?.access_token) return false;
+  try {
+    const res = await fetch("/api/mcp/restore", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        outline_token: auth.access_token,
+        outline_refresh: auth.refresh_token || "",
+        mcp_url: auth.mcp_url || "",
+      }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function applyLogin(data) {
+  if (data?.access_token) saveAuth(data);
+  await restoreServerSession();
+  await loadHistoryStore();
+  if (!currentId) currentId = newId();
+  bindCurrent(currentId);
 }
 
 async function connect() {
-  saveSettings();
   setStatus("正在通过本机网络连接 MCP…", "busy");
   try {
     const res = await fetch("/api/mcp/connect", {
@@ -515,25 +656,33 @@ async function connect() {
   }
 }
 
-async function sendChat(text, signal, epoch) {
-  messages.push({ role: "user", content: text });
-  addMessage("user", text);
-  const thinkingChip = document.createElement("div");
-  thinkingChip.className = "thinking-chip";
-  thinkingChip.innerHTML = '<span class="thinking-spinner" aria-hidden="true"></span><span>思考中...</span>';
-  els.thread.appendChild(thinkingChip);
-  scrollThreadToBottom();
-  let assistant = null;
+async function sendChat(text, sessionId, signal) {
+  const rec = ensureSession(sessionId);
+  rec.messages.push({ role: "user", content: text });
+  markRound(sessionId);
+  if (currentId === sessionId) addMessage("user", text);
 
+  let thinkingChip = null;
+  if (currentId === sessionId) {
+    thinkingChip = document.createElement("div");
+    thinkingChip.className = "thinking-chip";
+    thinkingChip.dataset.thinking = sessionId;
+    thinkingChip.innerHTML = '<span class="thinking-spinner" aria-hidden="true"></span><span>思考中...</span>';
+    els.thread.appendChild(thinkingChip);
+    scrollThreadToBottom();
+  }
+
+  const snapshot = rec.messages
+    .filter((m) => m.role === "user" || m.role === "assistant")
+    .map((m) => ({ role: m.role, content: m.content }));
   const res = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...payload(), messages }),
+    body: JSON.stringify({ ...payload(), messages: snapshot }),
     signal,
   });
-  if (!isCurrentConversation(epoch)) return;
   if (!res.ok || !res.body) {
-    thinkingChip.remove();
+    thinkingChip?.remove();
     const data = await res.json().catch(() => ({}));
     throw new Error(errorText(data));
   }
@@ -542,16 +691,32 @@ async function sendChat(text, signal, epoch) {
   const decoder = new TextDecoder();
   let buffer = "";
   let full = "";
+  let assistant = null;
 
   const showAssistant = () => {
-    if (assistant) return;
-    thinkingChip.remove();
+    if (currentId !== sessionId) return;
+    const chip = els.thread.querySelector("[data-thinking]");
+    if (chip) chip.remove();
+    if (assistant && assistant.isConnected) return;
     assistant = addMessage("assistant", "");
+    assistant.dataset.stream = sessionId;
+  };
+
+  const writeAssistant = (textValue) => {
+    const row = ensureSession(sessionId);
+    const last = row.messages[row.messages.length - 1];
+    if (last && last.role === "assistant") last.content = textValue;
+    else row.messages.push({ role: "assistant", content: textValue });
+    persistHistoryStore(false);
+    if (currentId === sessionId) {
+      showAssistant();
+      if (assistant) assistant.innerHTML = renderMarkdown(textValue);
+      scrollThreadToBottom();
+    }
   };
 
   try {
     while (true) {
-      if (!isCurrentConversation(epoch)) return;
       const { value, done } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
@@ -567,37 +732,29 @@ async function sendChat(text, signal, epoch) {
           continue;
         }
         if (event.type === "thinking") {
-          thinkingChip.style.display = "flex";
+          if (currentId === sessionId) {
+            const chip = els.thread.querySelector("[data-thinking]");
+            if (chip) chip.style.display = "flex";
+          }
         } else if (event.type === "delta") {
-          showAssistant();
           full += event.text;
-          assistant.innerHTML = renderMarkdown(full);
+          writeAssistant(full);
         } else if (event.type === "error") {
-          thinkingChip.remove();
           throw new Error(event.message);
-        } else if (event.type === "mcp_ready") {
-          setStatus("知识库已连接", "ok");
         }
-        scrollThreadToBottom();
       }
     }
   } catch (err) {
-    if (!isCurrentConversation(epoch)) return;
-    thinkingChip.remove();
-    if (full) {
-      messages.push({ role: "assistant", content: full });
-    }
+    if (full) writeAssistant(full);
     throw err;
   }
 
-  if (!isCurrentConversation(epoch)) return;
-  thinkingChip.remove();
   if (!full) {
-    addMessage("assistant", "（模型没有返回文本）");
-  } else if (assistant) {
-    assistant.innerHTML = renderMarkdown(full);
+    const fallback = "（模型没有返回文本）";
+    writeAssistant(fallback);
+  } else {
+    writeAssistant(full);
   }
-  messages.push({ role: "assistant", content: full });
 }
 
 function updateComposerChrome() {
@@ -617,47 +774,63 @@ function onThreadScroll() {
   }, 500);
 }
 
-function boot() {
+function startOauth() {
+  const popup = window.open(
+    "/api/mcp/oauth/start",
+    "outline-oauth",
+    "width=520,height=740,menubar=no,toolbar=no,status=no"
+  );
+  if (!popup) {
+    setStatus("浏览器拦截了登录弹窗，请允许本站弹出窗口后重试", "bad");
+    return;
+  }
+  setStatus("请在弹出窗口中用企业账号密码登录…", "busy");
+  popup.focus();
+  const timer = setInterval(() => {
+    if (!popup.closed) return;
+    clearInterval(timer);
+    fetch("/api/defaults")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.oauth_connected || d.has_outline_token || loadAuth()?.access_token) {
+          setStatus("企业登录成功，正在连接知识库…", "ok");
+          return applyLogin(d).then(() => connect()).then(() => showApp());
+        }
+        if (!document.body.classList.contains("wiki-ready")) {
+          setStatus("登录未完成，请再试一次", "bad");
+        }
+      })
+      .catch(() => {
+        setStatus("无法确认登录状态，请再试一次", "bad");
+      });
+  }, 600);
+}
+
+async function boot() {
   attachRipple();
+  await restoreServerSession();
+  await loadHistoryStore();
+  if (!currentId) currentId = newId();
+  bindCurrent(currentId);
   els.thread.addEventListener("scroll", onThreadScroll, { passive: true });
   updateComposerChrome();
-  document.addEventListener("click", (event) => {
-    if (!event.target.closest(".md-select")) {
-      document.querySelectorAll(".md-select.open").forEach((el) => el.classList.remove("open"));
-    }
-  });
-  const saved = loadSettings();
-  keysByProvider = saved.keysByProvider || {};
-  fillProviderSelect();
-
-  const remembered = saved.mcpUrl || "";
-  els.mcpUrl.value = remembered.includes("getoutline.com") ? "" : remembered;
-
-  const providerId = PROVIDERS.some((p) => p.id === saved.provider) ? saved.provider : "openai";
-  els.provider.value = providerId;
-  if (saved.openaiKey && !keysByProvider[providerId]) {
-    keysByProvider[providerId] = saved.openaiKey;
-  }
-  els.openaiBase.value = saved.openaiBase || "";
-  applyProvider(currentProvider(), {
-    keepBase: Boolean(saved.openaiBase),
-    savedModel: saved.openaiModel || "",
-  });
-  if (saved.openaiModel) {
-    els.openaiModel.value = saved.openaiModel;
-  }
 
   window.addEventListener("message", (event) => {
     if (event.origin !== location.origin) return;
     const data = event.data || {};
     if (data.type !== "outline-oauth") return;
     if (data.status === "ok") {
-      setStatus("企业登录成功，正在测试连接…", "ok");
-      connect().catch(() => {});
+      setStatus("企业登录成功，正在连接知识库…", "ok");
+      applyLogin(data)
+        .then(() => connect())
+        .then(() => showApp())
+        .catch((err) => {
+          setStatus(err.message || "连接知识库失败", "bad");
+        });
       return;
     }
     const map = {
-      missing_url: "请先填写企业 Outline 地址",
+      missing_url: "请先在管理员界面填写网协 MCP 地址",
       start: "无法打开企业登录：" + (data.message || ""),
       missing: "登录未完成",
       state: "登录校验失败，请再试一次",
@@ -666,99 +839,82 @@ function boot() {
     setStatus(map[data.status] || "登录未完成", "bad");
   });
 
-  fetch("/api/defaults")
-    .then((r) => r.json())
-    .then((d) => {
-      if (!els.mcpUrl.value && d.mcp_url && !String(d.mcp_url).includes("getoutline.com")) {
-        els.mcpUrl.value = d.mcp_url;
+  try {
+    const res = await fetch("/api/defaults");
+    const d = await res.json();
+    if (!d.mcp_url) {
+      showGate();
+      setStatus("请先在管理员界面填写网协 MCP 地址", "idle");
+    } else if (d.oauth_connected || d.has_outline_token || loadAuth()?.access_token) {
+      try {
+        await applyLogin(d);
+        await connect();
+        await showApp();
+      } catch (err) {
+        showGate();
+        setStatus(err.message || "知识库未连接，请重新登录", "bad");
       }
-      if (d.oauth_connected) setStatus("已有企业登录会话，可点测试连接", "ok");
-    })
-    .catch(() => {});
-
-  els.provider.addEventListener("change", () => {
-    applyProvider(currentProvider());
-    saveSettings();
-  });
-  els.openaiModelSelect.addEventListener("change", () => {
-    saveSettings();
-  });
+    } else {
+      showGate();
+    }
+  } catch {
+    showGate();
+  }
 
   els.btnOauth.addEventListener("click", (e) => {
     e.preventDefault();
-    saveSettings();
-    const mcpUrl = els.mcpUrl.value.trim();
-    if (!mcpUrl) {
-      setStatus("请先填写企业 Outline / MCP 地址", "bad");
-      els.mcpUrl.focus();
-      return;
-    }
-    if (mcpUrl.includes("getoutline.com")) {
-      setStatus("请改成你们自己的知识库地址，不要使用 getoutline.com", "bad");
-      return;
-    }
-    const url = new URL("/api/mcp/oauth/start", location.origin);
-    url.searchParams.set("mcp_url", mcpUrl);
-    const popup = window.open(
-      url.toString(),
-      "outline-oauth",
-      "popup=yes,width=520,height=740,menubar=no,toolbar=no,status=no"
-    );
-    if (!popup) {
-      setStatus("浏览器拦截了登录弹窗，请允许本站弹出窗口后重试", "bad");
-      return;
-    }
-    setStatus("请在弹出窗口中用企业账号密码登录…", "busy");
-    popup.focus();
-    const timer = setInterval(() => {
-      if (!popup.closed) return;
-      clearInterval(timer);
-      fetch("/api/defaults")
-        .then((r) => r.json())
-        .then((d) => {
-          if (d.oauth_connected) {
-            setStatus("企业登录成功，正在测试连接…", "ok");
-            return connect();
-          }
-        })
-        .catch(() => {});
-    }, 600);
+    startOauth();
   });
 
-  els.btnConnect.addEventListener("click", () => connect().catch(() => {}));
-  els.btnClear.addEventListener("click", () => {
+  els.btnNewSession.addEventListener("click", () => {
     startNewConversation();
   });
-  ["mcpUrl", "openaiBase", "openaiKey", "openaiModel"].forEach((id) => {
-    document.getElementById(id).addEventListener("change", saveSettings);
+
+  if (els.btnLogout) {
+    els.btnLogout.addEventListener("click", () => {
+      logoutWiki();
+    });
+  }
+
+  els.historyList.addEventListener("click", (e) => {
+    const del = e.target.closest("[data-del]");
+    if (del) {
+      e.preventDefault();
+      e.stopPropagation();
+      deleteSession(del.getAttribute("data-del"));
+      return;
+    }
+    const item = e.target.closest(".history-item");
+    if (item) openSession(item.getAttribute("data-id"));
   });
 
   els.form.addEventListener("submit", async (e) => {
     e.preventDefault();
-    if (chatAbort) {
-      chatAbort.abort();
+    if (!currentId) bindCurrent(newId());
+    const sessionId = currentId;
+    const running = inflight.get(sessionId);
+    if (running) {
+      running.abort();
       return;
     }
     const text = els.input.value.trim();
     if (!text) return;
     els.input.value = "";
-    saveSettings();
-    chatAbort = new AbortController();
-    const epoch = conversationEpoch;
+    const ctrl = new AbortController();
+    inflight.set(sessionId, ctrl);
     setSending(true);
     try {
-      await sendChat(text, chatAbort.signal, epoch);
+      await sendChat(text, sessionId, ctrl.signal);
     } catch (err) {
-      if (!isCurrentConversation(epoch)) return;
+      if (currentId !== sessionId) return;
       if (err.name === "AbortError") {
         addMessage("error", "已中止当前回复", "error");
       } else {
         addMessage("error", err.message, "error");
       }
     } finally {
-      if (!isCurrentConversation(epoch)) return;
-      chatAbort = null;
-      setSending(false);
+      inflight.delete(sessionId);
+      if (currentId === sessionId) setSending(false);
     }
   });
 

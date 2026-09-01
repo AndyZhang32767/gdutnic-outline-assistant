@@ -3,14 +3,17 @@ from __future__ import annotations
 import json
 import os
 import secrets
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from itsdangerous import BadSignature, URLSafeTimedSerializer
 from starlette.middleware.sessions import SessionMiddleware
 
+from server import admin_store, chat_store
 from server.chat import stream_chat
 from server.mcp_client import McpError, OutlineMcpClient, normalize_mcp_url
 from server.oauth import exchange_code, start_oauth
@@ -35,6 +38,18 @@ def _session_secret() -> str:
     return secret
 
 
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    admin_store.load()
+    slug = admin_store.path()
+    print("")
+    print(f"管理员界面: http://127.0.0.1:8787/{slug}")
+    if not admin_store.has_user():
+        print("尚未注册管理员，首次打开站点会跳转到该地址并创建账号。")
+    print("")
+    yield
+
+
 class NoCacheStatic(StaticFiles):
     async def get_response(self, path: str, scope):
         response = await super().get_response(path, scope)
@@ -43,13 +58,73 @@ class NoCacheStatic(StaticFiles):
         return response
 
 
-app = FastAPI(title="GDUTNIC Outline 查询助手")
+app = FastAPI(title="GDUTNIC Outline 查询助手", lifespan=lifespan)
 app.add_middleware(
     SessionMiddleware,
     secret_key=_session_secret(),
+    session_cookie="gdutnic_wiki",
     same_site="lax",
     https_only=False,
+    max_age=60 * 60 * 24 * 30,
 )
+
+VISITOR_COOKIE = "gdutnic_visitor"
+ADMIN_COOKIE = "gdutnic_admin"
+
+
+def _admin_signer() -> URLSafeTimedSerializer:
+    return URLSafeTimedSerializer(_session_secret(), salt="gdutnic-admin")
+
+
+def _set_admin_cookie(response: JSONResponse, username: str) -> None:
+    token = _admin_signer().dumps({"u": username})
+    response.set_cookie(
+        ADMIN_COOKIE,
+        token,
+        max_age=60 * 60 * 24 * 30,
+        httponly=True,
+        samesite="lax",
+        path="/",
+    )
+
+
+def _clear_admin_cookie(response: JSONResponse) -> None:
+    response.delete_cookie(ADMIN_COOKIE, path="/")
+
+
+def _admin_from_cookie(request: Request) -> str:
+    raw = request.cookies.get(ADMIN_COOKIE) or ""
+    if not raw:
+        return ""
+    try:
+        data = _admin_signer().loads(raw, max_age=60 * 60 * 24 * 30)
+    except (BadSignature, Exception):
+        return ""
+    name = str(data.get("u") or "").strip()
+    if name and name in admin_store.usernames():
+        return name
+    return ""
+
+
+def _visitor_id(request: Request) -> str:
+    value = (request.cookies.get(VISITOR_COOKIE) or "").strip()
+    if len(value) >= 16:
+        return value
+    return secrets.token_urlsafe(18)
+
+
+def _with_visitor_cookie(request: Request, payload: dict[str, Any], visitor: str) -> JSONResponse:
+    response = JSONResponse(payload)
+    if request.cookies.get(VISITOR_COOKIE) != visitor:
+        response.set_cookie(
+            VISITOR_COOKIE,
+            visitor,
+            max_age=60 * 60 * 24 * 400,
+            httponly=True,
+            samesite="lax",
+            path="/",
+        )
+    return response
 
 app.mount("/static", NoCacheStatic(directory=WEB), name="static")
 ICON.mkdir(parents=True, exist_ok=True)
@@ -65,7 +140,9 @@ async def favicon():
 
 
 @app.get("/")
-async def index() -> FileResponse:
+async def index():
+    if not admin_store.has_user():
+        return RedirectResponse(f"/{admin_store.path()}", status_code=302)
     return FileResponse(
         WEB / "index.html",
         headers={
@@ -75,12 +152,22 @@ async def index() -> FileResponse:
     )
 
 
+def _resolve_mcp_url(request: Request, body: dict[str, Any] | None = None) -> str:
+    body = body or {}
+    admin = admin_store.mcp_url()
+    if admin:
+        return admin
+    return ((body.get("mcp_url") or "") or request.session.get("mcp_url") or "").strip()
+
+
 @app.get("/api/defaults")
 async def defaults(request: Request) -> dict[str, Any]:
     session = request.session
     return {
-        "mcp_url": session.get("mcp_url") or "",
-        "has_outline_token": bool(session.get("outline_token") or session.get("mcp_api_key")),
+        "mcp_url": admin_store.mcp_url() or session.get("mcp_url") or "",
+        "has_outline_token": bool(
+            session.get("outline_token") or session.get("mcp_api_key") or admin_store.mcp_api_key()
+        ),
         "oauth_connected": bool(session.get("outline_token")),
     }
 
@@ -102,9 +189,9 @@ async def save_settings(request: Request) -> dict[str, Any]:
 @app.post("/api/mcp/connect")
 async def mcp_connect(request: Request) -> dict[str, Any]:
     body = await request.json()
-    raw = (body.get("mcp_url") or request.session.get("mcp_url") or "").strip()
+    raw = _resolve_mcp_url(request, body)
     if not raw:
-        raise HTTPException(status_code=400, detail="请先填写企业 Outline / MCP 地址")
+        raise HTTPException(status_code=400, detail="请先在管理员界面填写网协 MCP 地址")
     mcp_url = normalize_mcp_url(raw)
     request.session["mcp_url"] = mcp_url
     token = _token_from(request, body)
@@ -133,15 +220,17 @@ async def mcp_connect(request: Request) -> dict[str, Any]:
 
 @app.get("/api/mcp/oauth/start")
 async def oauth_start(request: Request, mcp_url: str | None = None):
-    raw = (mcp_url or request.session.get("mcp_url") or "").strip()
+    raw = (admin_store.mcp_url() or mcp_url or request.session.get("mcp_url") or "").strip()
     if not raw:
         return _oauth_popup_result("missing_url")
     mcp_url = normalize_mcp_url(raw)
-    redirect_uri = str(request.url_for("oauth_callback"))
+    redirect_uri = str(request.base_url).rstrip("/") + str(request.url_for("oauth_callback").path)
     try:
         flow = await start_oauth(mcp_url, redirect_uri)
     except Exception as exc:
+        print(f"[oauth_start] {type(exc).__name__}: {exc}")
         return _oauth_popup_result("start", str(exc))
+    flow["redirect_uri"] = redirect_uri
     request.session["oauth_flow"] = flow
     request.session["mcp_url"] = mcp_url
     return RedirectResponse(flow["authorize_url"], status_code=302)
@@ -160,7 +249,7 @@ async def oauth_callback(request: Request, code: str | None = None, state: str |
             client_id=flow["client_id"],
             client_secret=flow.get("client_secret") or "",
             code=code,
-            redirect_uri=str(request.url_for("oauth_callback")),
+            redirect_uri=flow.get("redirect_uri") or str(request.url_for("oauth_callback")),
             code_verifier=flow["code_verifier"],
             mcp_url=flow["mcp_url"],
         )
@@ -179,7 +268,30 @@ async def oauth_callback(request: Request, code: str | None = None, state: str |
         "mcp_url": flow["mcp_url"],
     }
     request.session.pop("oauth_flow", None)
-    return _oauth_popup_result("ok")
+    return _oauth_popup_result(
+        "ok",
+        extra={
+            "access_token": request.session.get("outline_token") or "",
+            "refresh_token": request.session.get("outline_refresh") or "",
+            "mcp_url": flow.get("mcp_url") or "",
+        },
+    )
+
+
+@app.post("/api/mcp/restore")
+async def mcp_restore(request: Request) -> dict[str, bool]:
+    body = await request.json()
+    token = (body.get("outline_token") or "").strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="缺少登录凭证")
+    request.session["outline_token"] = token
+    refresh = (body.get("outline_refresh") or "").strip()
+    if refresh:
+        request.session["outline_refresh"] = refresh
+    raw = (body.get("mcp_url") or "").strip()
+    if raw:
+        request.session["mcp_url"] = normalize_mcp_url(raw)
+    return {"ok": True}
 
 
 @app.post("/api/mcp/logout")
@@ -192,21 +304,19 @@ async def mcp_logout(request: Request) -> dict[str, bool]:
 @app.post("/api/chat")
 async def chat(request: Request) -> StreamingResponse:
     body = await request.json()
-    raw = (body.get("mcp_url") or request.session.get("mcp_url") or "").strip()
+    raw = _resolve_mcp_url(request, body)
     if not raw:
-        raise HTTPException(status_code=400, detail="请先填写企业 Outline / MCP 地址")
+        raise HTTPException(status_code=400, detail="请先在管理员界面填写网协 MCP 地址")
     mcp_url = normalize_mcp_url(raw)
     request.session["mcp_url"] = mcp_url
     token = _token_from(request, body)
     if not token:
         return JSONResponse({"error": "尚未连接 Outline MCP，请先在弹窗中完成企业登录"}, status_code=401)
 
-    openai_base = (body.get("openai_base_url") or "").strip()
-    openai_key = (body.get("openai_api_key") or "").strip()
-    model = (body.get("openai_model") or "").strip()
+    openai_base, openai_key, model, provider = admin_store.chat_credentials()
     messages = body.get("messages") or []
     if not openai_base or not openai_key or not model:
-        raise HTTPException(status_code=400, detail="请填写 OpenAI 兼容接口的 Base URL、API Key 和模型名")
+        raise HTTPException(status_code=400, detail="尚未配置模型接口，请先打开管理员界面完成设置")
     if not messages:
         raise HTTPException(status_code=400, detail="消息不能为空")
 
@@ -222,7 +332,8 @@ async def chat(request: Request) -> StreamingResponse:
                     messages=messages,
                     mcp=mcp,
                     tools=tools,
-                    provider=body.get("provider") or "",
+                    provider=provider,
+                    system_prompt=admin_store.system_prompt(),
                 ):
                     yield _sse(event)
         except McpError as exc:
@@ -238,32 +349,263 @@ def _token_from(request: Request, body: dict[str, Any]) -> str:
     if from_body:
         request.session["mcp_api_key"] = from_body
         return from_body
-    return (request.session.get("mcp_api_key") or request.session.get("outline_token") or "").strip()
+    return (
+        request.session.get("mcp_api_key")
+        or request.session.get("outline_token")
+        or admin_store.mcp_api_key()
+        or ""
+    ).strip()
 
 
 def _sse(payload: dict[str, Any]) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
-def _oauth_popup_result(status: str, message: str = "") -> HTMLResponse:
-    payload = json.dumps({"type": "outline-oauth", "status": status, "message": message}, ensure_ascii=False)
+def _oauth_popup_result(status: str, message: str = "", extra: dict[str, Any] | None = None) -> HTMLResponse:
+    payload = json.dumps(
+        {"type": "outline-oauth", "status": status, "message": message, **(extra or {})},
+        ensure_ascii=False,
+    )
+    ok = status == "ok"
+    detail = message or ("登录成功，正在关闭窗口…" if ok else "登录未完成，请关闭此窗口后重试。")
+    auto_close = "window.close();" if ok else ""
     html = f"""<!DOCTYPE html>
 <html lang="zh-CN">
   <head><meta charset="utf-8"><title>知识库登录</title></head>
-  <body style="font-family:sans-serif;padding:24px">
-    <p>{"登录成功，正在关闭窗口…" if status == "ok" else "登录未完成，可以关闭此窗口后重试。"}</p>
+  <body style="font-family:sans-serif;padding:24px;max-width:420px">
+    <p>{detail}</p>
     <script>
       const payload = {payload};
+      try {{
+        if (payload.status === "ok" && payload.access_token) {{
+          localStorage.setItem("gdutnic-wiki-auth", JSON.stringify({{
+            access_token: payload.access_token,
+            refresh_token: payload.refresh_token || "",
+            mcp_url: payload.mcp_url || ""
+          }}));
+        }}
+      }} catch (e) {{}}
       try {{
         if (window.opener) {{
           window.opener.postMessage(payload, window.location.origin);
         }}
       }} catch (e) {{}}
-      window.close();
+      {auto_close}
       setTimeout(function () {{
-        if (!window.closed) location.replace("/?oauth=" + encodeURIComponent(payload.status));
+        if (!window.closed && payload.status === "ok") {{
+          location.replace("/?oauth=" + encodeURIComponent(payload.status));
+        }}
       }}, 400);
     </script>
   </body>
 </html>"""
     return HTMLResponse(html)
+
+
+def _admin_gate(request: Request) -> bool:
+    return request.session.get("admin_gate") == admin_store.path()
+
+
+def _admin_ok(request: Request) -> bool:
+    if _admin_from_cookie(request):
+        return True
+    return bool(request.session.get("admin_ok")) and admin_store.has_user()
+
+
+def _require_admin(request: Request) -> None:
+    if not _admin_ok(request):
+        raise HTTPException(status_code=401, detail="请先登录管理员")
+
+
+def _admin_username(request: Request) -> str:
+    name = _admin_from_cookie(request)
+    if name:
+        return name
+    if not _admin_ok(request):
+        return ""
+    name = str(request.session.get("admin_username") or "").strip()
+    if name:
+        return name
+    names = admin_store.usernames()
+    if names:
+        request.session["admin_username"] = names[0]
+        return names[0]
+    return ""
+
+
+@app.get("/api/admin/status")
+async def admin_status(request: Request) -> dict[str, Any]:
+    return {
+        "setup": admin_store.has_user(),
+        "logged_in": _admin_ok(request),
+        "gate": _admin_gate(request),
+        "username": _admin_username(request),
+    }
+
+
+@app.post("/api/admin/register")
+async def admin_register(request: Request) -> dict[str, Any]:
+    if not _admin_gate(request):
+        raise HTTPException(status_code=403, detail="请从控制台提示的管理员网址进入")
+    if admin_store.has_user():
+        raise HTTPException(status_code=409, detail="管理员已注册，请直接登录")
+    body = await request.json()
+    try:
+        admin_store.register(str(body.get("username") or ""), str(body.get("password") or ""))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    request.session["admin_ok"] = True
+    request.session["admin_username"] = str(body.get("username") or "").strip()
+    response = JSONResponse({"ok": True, "username": request.session["admin_username"]})
+    _set_admin_cookie(response, request.session["admin_username"])
+    return response
+
+
+@app.post("/api/admin/login")
+async def admin_login(request: Request) -> JSONResponse:
+    if not _admin_gate(request):
+        raise HTTPException(status_code=403, detail="请从控制台提示的管理员网址进入")
+    body = await request.json()
+    username = str(body.get("username") or "").strip()
+    if not admin_store.verify_login(username, str(body.get("password") or "")):
+        raise HTTPException(status_code=401, detail="用户名或密码不正确")
+    request.session["admin_ok"] = True
+    request.session["admin_username"] = username
+    response = JSONResponse({"ok": True, "username": username})
+    _set_admin_cookie(response, username)
+    return response
+
+
+@app.post("/api/admin/logout")
+async def admin_logout(request: Request) -> JSONResponse:
+    request.session.pop("admin_ok", None)
+    request.session.pop("admin_username", None)
+    response = JSONResponse({"ok": True})
+    _clear_admin_cookie(response)
+    return response
+
+
+@app.get("/api/admin/users")
+async def admin_list_users(request: Request) -> dict[str, Any]:
+    _require_admin(request)
+    return {"usernames": admin_store.usernames()}
+
+
+@app.post("/api/admin/users")
+async def admin_add_user(request: Request) -> dict[str, Any]:
+    _require_admin(request)
+    body = await request.json()
+    try:
+        admin_store.add_user(str(body.get("username") or ""), str(body.get("password") or ""))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "usernames": admin_store.usernames()}
+
+
+@app.patch("/api/admin/users")
+async def admin_update_user(request: Request) -> dict[str, Any]:
+    _require_admin(request)
+    body = await request.json()
+    old = str(body.get("old_username") or "").strip()
+    if old and old == str(request.session.get("admin_username") or ""):
+        raise HTTPException(status_code=400, detail="不能修改当前登录的管理员")
+    try:
+        name = admin_store.update_user(old, str(body.get("username") or ""), str(body.get("password") or ""))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "username": name, "usernames": admin_store.usernames()}
+
+
+@app.delete("/api/admin/users")
+async def admin_delete_user(request: Request) -> dict[str, Any]:
+    _require_admin(request)
+    body = await request.json()
+    name = str(body.get("username") or "").strip()
+    try:
+        admin_store.delete_user(name, str(request.session.get("admin_username") or ""))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "usernames": admin_store.usernames()}
+
+
+@app.get("/api/admin/model")
+async def admin_model_get(request: Request) -> dict[str, Any]:
+    _require_admin(request)
+    return admin_store.model_public()
+
+
+@app.post("/api/admin/model")
+async def admin_model_save(request: Request) -> dict[str, Any]:
+    _require_admin(request)
+    body = await request.json()
+    return admin_store.save_model(body)
+
+
+@app.get("/api/admin/mcp")
+async def admin_mcp_get(request: Request) -> dict[str, Any]:
+    _require_admin(request)
+    return admin_store.mcp_public()
+
+
+@app.post("/api/admin/mcp")
+async def admin_mcp_save(request: Request) -> dict[str, Any]:
+    _require_admin(request)
+    body = await request.json()
+    return admin_store.save_mcp(body)
+
+
+@app.get("/api/chats")
+async def chats_get(request: Request) -> JSONResponse:
+    visitor = _visitor_id(request)
+    packed = chat_store.load_visitor_chats(visitor)
+    return _with_visitor_cookie(request, packed, visitor)
+
+
+@app.put("/api/chats")
+async def chats_put(request: Request) -> JSONResponse:
+    visitor = _visitor_id(request)
+    body = await request.json()
+    sessions = body.get("sessions") if isinstance(body.get("sessions"), list) else []
+    chat_store.save_visitor_chats(visitor, sessions, str(body.get("currentId") or ""))
+    return _with_visitor_cookie(request, {"ok": True}, visitor)
+
+
+@app.get("/api/admin/chats")
+async def admin_chats_list(request: Request) -> dict[str, Any]:
+    _require_admin(request)
+    return {"items": chat_store.list_all(), **chat_store.stats()}
+
+
+@app.post("/api/admin/chats/cache")
+async def admin_chats_cache(request: Request) -> dict[str, Any]:
+    _require_admin(request)
+    body = await request.json()
+    try:
+        max_mb = int(body.get("max_mb"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="请填写有效的缓存大小") from None
+    stats = chat_store.set_max_mb(max_mb)
+    return {"ok": True, "items": chat_store.list_all(), **stats}
+
+
+@app.get("/api/admin/chats/{visitor_id}/{chat_id}")
+async def admin_chats_detail(request: Request, visitor_id: str, chat_id: str) -> dict[str, Any]:
+    _require_admin(request)
+    rec = chat_store.get_session(visitor_id, chat_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="对话不存在")
+    return rec
+
+
+@app.get("/{slug}")
+async def admin_page(slug: str, request: Request):
+    if len(slug) != 8 or slug != admin_store.path():
+        raise HTTPException(status_code=404, detail="页面不存在")
+    request.session["admin_gate"] = slug
+    return FileResponse(
+        WEB / "admin.html",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "Pragma": "no-cache",
+        },
+    )

@@ -32,12 +32,22 @@ class OutlineMcpClient:
         self._client: httpx.AsyncClient | None = None
 
     async def __aenter__(self) -> "OutlineMcpClient":
-        self._client = httpx.AsyncClient(
-            timeout=httpx.Timeout(90.0, connect=20.0),
-            follow_redirects=True,
-        )
-        await self.initialize()
-        return self
+        last: Exception | None = None
+        for trust_env in (True, False):
+            self._client = httpx.AsyncClient(
+                timeout=httpx.Timeout(90.0, connect=20.0),
+                follow_redirects=True,
+                trust_env=trust_env,
+            )
+            try:
+                await self.initialize()
+                return self
+            except Exception as exc:
+                last = exc
+                print(f"[mcp] connect trust_env={trust_env}: {type(exc).__name__}: {exc}")
+                await self._client.aclose()
+                self._client = None
+        raise last if last else RuntimeError("无法连接网协 Wiki")
 
     async def __aexit__(self, *args: Any) -> None:
         if self._client is not None:

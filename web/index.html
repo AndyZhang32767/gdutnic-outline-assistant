@@ -7,80 +7,67 @@
     <title>Wiki 查询助手</title>
     <link rel="icon" type="image/png" href="/icon/gdutnic.png" />
     <link rel="apple-touch-icon" href="/icon/gdutnic.png" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260901c" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260901ax" />
   </head>
-  <body>
-    <div class="app">
+  <body class="gate-body">
+    <section id="wikiGate" class="wiki-gate">
+      <div class="mark"><img src="/icon/gdutnic.png" alt="" /></div>
+      <h1>欢迎使用网协Wiki助手</h1>
+      <p class="hint" id="gateStatus"></p>
+      <button type="button" id="btnOauth" class="animated-button">
+        <svg class="arr-2" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path d="M16.1716 10.9999L10.8076 5.63589L12.2218 4.22168L20 11.9999L12.2218 19.778L10.8076 18.3638L16.1716 12.9999H4V10.9999H16.1716Z"></path>
+        </svg>
+        <span class="text">网协认证登陆</span>
+        <span class="circle"></span>
+        <svg class="arr-1" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path d="M16.1716 10.9999L10.8076 5.63589L12.2218 4.22168L20 11.9999L12.2218 19.778L10.8076 18.3638L16.1716 12.9999H4V10.9999H16.1716Z"></path>
+        </svg>
+      </button>
+    </section>
+
+    <div id="app" class="app field-hidden" hidden>
       <aside class="panel">
         <header class="brand">
           <div class="mark"><img src="/icon/gdutnic.png" alt="" /></div>
           <div>
             <h1>GDUTNIC Wiki 查询助手</h1>
-            <p class="brand-sub">Wiki 查询助手<span class="ver-chip" title="当前为早期测试版，不代表最终表现">v0.0.1</span></p>
+            <p class="brand-sub">Wiki 查询助手<span class="ver-chip" title="当前为早期测试版，不代表最终表现">v0.5</span></p>
           </div>
         </header>
 
-        <section class="card">
-          <h2>Wiki 连接设置</h2>
-          <label>
-            网协 MCP 地址
-            <input id="mcpUrl" spellcheck="false" placeholder="https://知识库域名 或 https://知识库域名/mcp" />
-          </label>
-          <label>
-            Outline API Key（可选）
-            <input id="mcpKey" type="password" placeholder="一般不用填，优先用弹窗登录" />
-          </label>
-          <div class="row">
-            <button type="button" id="btnOauth" class="btn primary">网协登录</button>
-            <button type="button" id="btnConnect" class="btn tonal">测试连接</button>
-          </div>
-          <p class="hint login-hint">点击「网协登录」会弹出窗口进行登陆</p>
-          <div id="mcpStatus" class="status idle">未连接</div>
+        <section class="history">
+          <h2>历史会话</h2>
+          <div id="historyList" class="history-list"></div>
         </section>
-
-        <section class="card">
-          <h2>模型接口</h2>
-          <label>
-            厂商
-            <select id="provider"></select>
-          </label>
-          <label>
-            Base URL
-            <input id="openaiBase" spellcheck="false" placeholder="由厂商自动填入，可改" />
-          </label>
-          <label>
-            API Key
-            <input id="openaiKey" type="password" placeholder="选择厂商后填入对应 Key" />
-          </label>
-          <label id="modelSelectWrap">
-            模型
-            <select id="openaiModelSelect"></select>
-          </label>
-          <label id="customModelWrap" hidden>
-            模型名称
-            <input id="openaiModel" spellcheck="false" placeholder="请填写模型名称" />
-          </label>
-          <p class="hint" id="providerHint">选择厂商后会填入兼容 OpenAI 的接口地址，再填该厂商的 API Key。</p>
-        </section>
+        <div class="panel-footer">
+          <button type="button" id="btnLogout" class="btn danger send" aria-label="登出" title="登出">
+            <span class="md-icon" style="--md-icon:url('/icon/symbol/logout_24dp_1F1F1F_FILL0_wght400_GRAD0_opsz24.svg')" aria-hidden="true"></span>
+          </button>
+          <button type="button" id="btnNewSession" class="btn primary send" aria-label="新建会话" title="新建会话">
+            <span class="md-icon" style="--md-icon:url('/icon/symbol/new_window_24dp_1F1F1F_FILL0_wght400_GRAD0_opsz24.svg')" aria-hidden="true"></span>
+          </button>
+        </div>
       </aside>
 
       <main class="chat">
         <header class="chat-bar" id="chatBar">
           <div>
-            <strong>向知识库提问</strong>
+            <strong id="chatTitle">新会话</strong>
           </div>
-          <button type="button" id="btnClear" class="btn ghost small">清空对话</button>
         </header>
         <div id="thread" class="thread"></div>
         <div class="composer-dock" id="composerDock">
           <div class="composer-blur" aria-hidden="true"></div>
           <form id="composer" class="composer">
             <textarea id="input" rows="1" placeholder="向知识库提问…"></textarea>
-            <button type="submit" id="btnSend" class="btn primary send" aria-label="发送">发送</button>
+            <button type="submit" id="btnSend" class="btn primary send" aria-label="发送">
+              <span class="md-icon" style="--md-icon:url('/icon/symbol/send_24dp_1F1F1F_FILL0_wght400_GRAD0_opsz24.svg')" aria-hidden="true"></span>
+            </button>
           </form>
         </div>
       </main>
     </div>
-    <script src="/static/app.js?v=20260901c"></script>
+    <script src="/static/app.js?v=20260901ax"></script>
   </body>
 </html>

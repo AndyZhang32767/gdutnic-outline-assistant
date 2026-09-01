@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#186078" />
+    <title>管理员 · Wiki 查询助手</title>
+    <link rel="icon" type="image/png" href="/icon/gdutnic.png" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260901au" />
+  </head>
+  <body class="admin-body">
+    <section id="authCard" class="admin-board">
+      <div class="admin-board-left">
+        <div class="admin-logo"><img src="/icon/gdutnic.png" alt="" /></div>
+        <h1 id="authTitle">注册管理员</h1>
+        <p id="authHint">请输入用户名和密码</p>
+      </div>
+      <form id="authForm" class="admin-board-right">
+        <label class="outlined-field">
+          <input id="adminUser" autocomplete="username" spellcheck="false" placeholder=" " />
+          <span>用户名</span>
+        </label>
+        <label class="outlined-field">
+          <input id="adminPass" type="password" autocomplete="new-password" placeholder=" " />
+          <span>密码</span>
+        </label>
+        <p class="admin-auth-status" id="authStatus"></p>
+        <button type="submit" class="btn primary" id="authSubmit">注册</button>
+      </form>
+    </section>
+
+    <div id="workspace" class="ga-app field-hidden" hidden>
+      <aside class="ga-nav">
+        <div class="ga-brand">
+          <div class="mark"><img src="/icon/gdutnic.png" alt="" /></div>
+          <div>
+            <h1>管理员</h1>
+            <p class="brand-sub">Wiki 查询助手</p>
+          </div>
+        </div>
+        <nav>
+          <button type="button" class="ga-nav-item active" data-page="model">模型接口</button>
+          <button type="button" class="ga-nav-item" data-page="mcp">知识库 MCP</button>
+          <button type="button" class="ga-nav-item" data-page="chats">对话记录</button>
+          <button type="button" class="ga-nav-item" data-page="account">管理员账号设置</button>
+        </nav>
+        <div class="panel-footer">
+          <button type="button" id="btnLogout" class="btn danger send" aria-label="登出" title="登出">
+            <span class="md-icon" style="--md-icon:url('/icon/symbol/logout_24dp_1F1F1F_FILL0_wght400_GRAD0_opsz24.svg')" aria-hidden="true"></span>
+          </button>
+        </div>
+      </aside>
+      <main class="ga-main">
+        <div class="ga-main-body">
+        <section id="page-model" class="ga-page">
+          <h1>模型接口</h1>
+          <p class="ga-lead">配置对话使用的 OpenAI 兼容接口</p>
+          <div class="ga-card">
+            <label>
+              厂商
+              <select id="provider"></select>
+            </label>
+            <label>
+              Base URL
+              <input id="openaiBase" spellcheck="false" placeholder="由厂商自动填入，可改" />
+            </label>
+            <label>
+              API Key
+              <input id="openaiKey" type="password" placeholder="选择厂商后填入对应 Key" />
+            </label>
+            <label id="modelSelectWrap">
+              模型
+              <select id="openaiModelSelect"></select>
+            </label>
+            <label id="customModelWrap" hidden>
+              模型名称
+              <input id="openaiModel" spellcheck="false" placeholder="请填写模型名称" />
+            </label>
+            <p class="hint" id="providerHint">选择厂商后会填入兼容 OpenAI 的接口地址，再填该厂商的 API Key。</p>
+            <div class="row admin-config-actions">
+              <button type="button" id="btnSaveModel" class="btn primary">保存配置</button>
+            </div>
+            <p class="hint" id="modelStatus"></p>
+          </div>
+          <div class="ga-card">
+            <label>
+              系统提示
+              <textarea id="systemPrompt" rows="8" spellcheck="false" placeholder="对话时发给模型的系统提示"></textarea>
+            </label>
+            <div class="row admin-config-actions">
+              <button type="button" id="btnSavePrompt" class="btn primary">保存提示</button>
+            </div>
+            <p class="hint" id="promptStatus"></p>
+          </div>
+        </section>
+
+        <section id="page-mcp" class="ga-page field-hidden" hidden>
+          <h1>知识库 MCP</h1>
+          <p class="ga-lead">对话页将使用这里填写的网协知识库地址</p>
+          <div class="ga-card">
+            <label>
+              网协 MCP 地址
+              <input id="mcpUrl" spellcheck="false" placeholder="https://知识库域名 或 https://知识库域名/mcp" />
+            </label>
+            <label>
+              Outline API Key（可选）
+              <input id="mcpKey" type="password" placeholder="一般不用填，优先用弹窗登录" />
+            </label>
+            <div class="row admin-config-actions">
+              <button type="button" id="btnSaveMcp" class="btn primary">保存配置</button>
+            </div>
+            <p class="hint" id="mcpStatus"></p>
+          </div>
+        </section>
+
+        <section id="page-chats" class="ga-page field-hidden" hidden>
+          <h1>对话记录</h1>
+          <p class="ga-lead">后台缓存的用户会话，可查阅内容与气泡配色</p>
+          <div class="chats-board">
+            <div class="chats-side">
+              <div id="sessionList" class="session-list"></div>
+              <div class="cache-limit-bar">
+                <label for="chatCacheMb">缓存上限</label>
+                <div class="cache-limit-value">
+                  <input id="chatCacheMb" type="number" min="1" max="4096" step="1" />
+                  <span class="cache-limit-unit">MB</span>
+                </div>
+              </div>
+            </div>
+            <div id="chatRecordThread" class="chats-thread thread"></div>
+          </div>
+        </section>
+
+        <section id="page-account" class="ga-page field-hidden" hidden>
+          <h1>管理员账号设置</h1>
+          <p class="ga-lead"></p>
+          <h2 class="ga-title">欢迎 <span id="accountWelcomeName"></span></h2>
+          <div id="adminList" class="ga-admin-list"></div>
+        </section>
+        </div>
+        <div class="ga-main-footer">
+          <button type="button" id="btnAddAdmin" class="btn tonal">注册管理员</button>
+        </div>
+      </main>
+    </div>
+
+    <div id="adminDialog" class="ga-dialog" hidden>
+      <div class="ga-dialog-backdrop" id="adminDialogBackdrop"></div>
+      <form id="adminDialogForm" class="ga-dialog-card" role="dialog" aria-labelledby="adminDialogTitle">
+        <h2 id="adminDialogTitle">注册管理员</h2>
+        <label class="outlined-field">
+          <input id="newAdminUser" autocomplete="off" spellcheck="false" placeholder=" " />
+          <span>用户名</span>
+        </label>
+        <label class="outlined-field">
+          <input id="newAdminPass" type="password" autocomplete="new-password" placeholder=" " />
+          <span>密码</span>
+        </label>
+        <p class="admin-auth-status" id="adminDialogStatus"></p>
+        <div class="ga-dialog-actions">
+          <button type="button" class="btn danger" id="btnDialogDelete" hidden>删除</button>
+          <div class="ga-dialog-actions-end">
+            <button type="button" class="btn ghost" id="btnDialogCancel">取消</button>
+            <button type="submit" class="btn primary" id="btnDialogConfirm">确认</button>
+          </div>
+        </div>
+      </form>
+    </div>
+    <script src="/static/admin.js?v=20260901au"></script>
+  </body>
+</html>

@@ -14,6 +14,22 @@ CLIENT_STORE = Path(__file__).resolve().parent.parent / "data" / "oauth_client.j
 SCOPES = "read"
 
 
+async def _wiki_request(method: str, url: str, **kwargs) -> httpx.Response:
+    last: Exception | None = None
+    for trust_env in (True, False):
+        try:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(30.0, connect=15.0),
+                follow_redirects=True,
+                trust_env=trust_env,
+            ) as client:
+                return await client.request(method, url, **kwargs)
+        except Exception as exc:
+            print(f"[wiki] {method} {url} trust_env={trust_env}: {type(exc).__name__}: {exc}")
+            last = exc
+    raise RuntimeError("无法连接网协 Wiki，请检查网络、VPN 或系统代理") from last
+
+
 async def start_oauth(mcp_url: str, redirect_uri: str) -> dict[str, str]:
     origin = origin_from_mcp_url(normalize_mcp_url(mcp_url))
     meta = await _auth_server_metadata(origin)
@@ -66,8 +82,7 @@ async def exchange_code(
     auth = None
     if client_secret:
         data["client_secret"] = client_secret
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.post(token_endpoint, data=data, headers=headers, auth=auth)
+    response = await _wiki_request("POST", token_endpoint, data=data, headers=headers, auth=auth)
     if response.status_code >= 400:
         raise RuntimeError(f"OAuth token 交换失败: {response.text[:500]}")
     return response.json()
@@ -89,8 +104,7 @@ async def refresh_access_token(
     }
     if client_secret:
         data["client_secret"] = client_secret
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.post(token_endpoint, data=data)
+    response = await _wiki_request("POST", token_endpoint, data=data)
     if response.status_code >= 400:
         raise RuntimeError(f"刷新 token 失败: {response.text[:500]}")
     return response.json()
@@ -98,10 +112,9 @@ async def refresh_access_token(
 
 async def _auth_server_metadata(origin: str) -> dict[str, Any]:
     url = f"{origin}/.well-known/oauth-authorization-server"
-    async with httpx.AsyncClient(timeout=20.0) as client:
-        response = await client.get(url)
-        response.raise_for_status()
-        return response.json()
+    response = await _wiki_request("GET", url)
+    response.raise_for_status()
+    return response.json()
 
 
 async def _get_or_register_client(origin: str, meta: dict[str, Any], redirect_uri: str) -> dict[str, Any]:
@@ -119,8 +132,7 @@ async def _get_or_register_client(origin: str, meta: dict[str, Any], redirect_ur
         "token_endpoint_auth_method": "none",
         "scope": SCOPES,
     }
-    async with httpx.AsyncClient(timeout=20.0) as client:
-        response = await client.post(register_url, json=payload)
+    response = await _wiki_request("POST", register_url, json=payload)
     if response.status_code >= 400:
         raise RuntimeError(f"OAuth 客户端注册失败: {response.text[:500]}")
     created = response.json()

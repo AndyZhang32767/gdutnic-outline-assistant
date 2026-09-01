@@ -75,9 +75,11 @@ async def stream_chat(
     tools: list[dict[str, Any]],
     extra_headers: dict[str, str] | None = None,
     provider: str = "",
+    system_prompt: str = "",
 ) -> AsyncIterator[dict[str, Any]]:
     openai_tools = mcp_tools_to_openai(tools)
-    working = [{"role": "system", "content": SYSTEM_PROMPT}, *messages]
+    prompt = (system_prompt or "").strip() or SYSTEM_PROMPT
+    working = [{"role": "system", "content": prompt}, *messages]
     endpoint = f"{normalize_openai_base(openai_base)}/chat/completions"
     headers = {
         "Authorization": f"Bearer {openai_key}",
