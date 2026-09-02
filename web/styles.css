@@ -38,9 +38,17 @@ html, body {
 .app {
   display: grid;
   grid-template-columns: 360px 1fr;
+  grid-template-areas: "nav main";
   height: 100vh;
   height: 100dvh;
   overflow: hidden;
+  position: relative;
+}
+.panel {
+  grid-area: nav;
+}
+.chat {
+  grid-area: main;
 }
 .app[hidden] {
   display: none !important;
@@ -174,6 +182,7 @@ html, body {
 }
 
 .panel {
+  grid-area: nav;
   background: var(--md-surface-low);
   padding: 20px 16px 12px;
   overflow: hidden;
@@ -579,6 +588,7 @@ textarea { resize: vertical; min-height: 56px; }
 .status.busy { background: var(--md-tertiary-container); color: var(--md-tertiary); }
 
 .chat {
+  grid-area: main;
   display: flex;
   flex-direction: column;
   background: var(--md-surface);
@@ -595,6 +605,10 @@ textarea { resize: vertical; min-height: 56px; }
   padding: 18px 28px 8px;
   flex-shrink: 0;
   transition: opacity 250ms ease;
+}
+.chat-bar-title {
+  min-width: 0;
+  flex: 1;
 }
 .chat-bar.dimmed {
   opacity: 0;
@@ -795,11 +809,12 @@ textarea { resize: vertical; min-height: 56px; }
 }
 
 .composer-dock {
-  position: absolute;
-  left: 24px;
-  right: 24px;
-  bottom: 24px;
-  z-index: 2;
+  grid-area: main;
+  align-self: end;
+  justify-self: stretch;
+  z-index: 15;
+  position: relative;
+  margin: 0 24px 24px;
   pointer-events: none;
 }
 .composer-blur {
@@ -911,8 +926,110 @@ textarea { resize: vertical; min-height: 56px; }
   height: 22px;
 }
 
+.mobile-only {
+  display: none !important;
+}
+.drawer-scrim {
+  display: none;
+}
+.menu-bars {
+  width: 18px;
+  height: 2px;
+  background: currentColor;
+  box-shadow: 0 -6px 0 currentColor, 0 6px 0 currentColor;
+}
+
 @media (max-width: 900px) {
-  .app { grid-template-columns: 1fr; }
+  .app {
+    grid-template-columns: 1fr;
+    grid-template-areas: "main";
+  }
+  .mobile-only {
+    display: inline-flex !important;
+  }
+  .drawer-scrim {
+    display: block;
+    position: absolute;
+    inset: 0;
+    z-index: 20;
+    border: 0;
+    padding: 0;
+    margin: 0;
+    background: rgba(25, 28, 30, 0.4);
+    cursor: pointer;
+  }
+  .drawer-scrim[hidden] {
+    display: none !important;
+  }
+  .panel {
+    position: absolute;
+    grid-area: main;
+    z-index: 21;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: min(320px, 86vw);
+    height: 100%;
+    padding-top: max(12px, env(safe-area-inset-top));
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+    transform: translateX(-105%);
+    transition: transform 280ms ease;
+    pointer-events: none;
+  }
+  .app.drawer-open .panel {
+    transform: translateX(0);
+    pointer-events: auto;
+    box-shadow: 8px 0 32px rgba(24, 96, 120, 0.18);
+  }
+  .chat {
+    grid-area: main;
+    min-height: 0;
+    width: 100%;
+    height: 100%;
+  }
+  .thread {
+    flex: 1;
+    min-height: 0;
+    padding: 8px 14px 108px;
+  }
+  .chat-bar {
+    padding: max(10px, env(safe-area-inset-top)) 12px 8px;
+    gap: 4px;
+    justify-content: flex-start;
+  }
+  .chat-bar.dimmed {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .chat-bar-title strong {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 16px;
+  }
+  .brand h1 {
+    font-size: 16px;
+  }
+  .composer-dock {
+    margin: 0 12px max(12px, env(safe-area-inset-bottom));
+  }
+  .wiki-gate {
+    padding: 24px 20px;
+  }
+  .wiki-gate h1 {
+    font-size: 28px;
+    margin-top: 20px;
+  }
+  .wiki-gate .mark {
+    width: 88px;
+    height: 88px;
+    border-radius: 28px;
+  }
+  .wiki-gate .mark img {
+    width: 68px;
+    height: 68px;
+  }
 }
 
 .admin-body .btn::after,

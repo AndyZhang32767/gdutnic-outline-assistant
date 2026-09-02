@@ -33,6 +33,8 @@ const els = {
   btnNewSession: document.getElementById("btnNewSession"),
   btnLogout: document.getElementById("btnLogout"),
   btnSend: document.getElementById("btnSend"),
+  btnMenu: document.getElementById("btnMenu"),
+  drawerScrim: document.getElementById("drawerScrim"),
   chatBar: document.getElementById("chatBar"),
   chatTitle: document.getElementById("chatTitle"),
 };
@@ -296,20 +298,41 @@ function renderThreadFromMessages() {
   updateComposerChrome();
 }
 
+function isMobileLayout() {
+  return window.matchMedia("(max-width: 900px)").matches;
+}
+
+function setDrawerOpen(open) {
+  if (!els.app) return;
+  els.app.classList.toggle("drawer-open", open);
+  if (els.drawerScrim) els.drawerScrim.hidden = !open;
+  if (els.btnMenu) els.btnMenu.setAttribute("aria-expanded", open ? "true" : "false");
+}
+
+function closeDrawer() {
+  setDrawerOpen(false);
+}
+
 function startNewConversation() {
   if (!messages.length && !inflight.has(currentId)) {
     if (!currentId) currentId = newId();
     persistHistoryStore();
     renderHistory();
     renderThreadFromMessages();
+    closeDrawer();
     return;
   }
   bindCurrent(newId());
+  closeDrawer();
 }
 
 function openSession(id) {
-  if (!id || id === currentId) return;
+  if (!id || id === currentId) {
+    closeDrawer();
+    return;
+  }
   bindCurrent(id);
+  closeDrawer();
 }
 
 function deleteSession(id) {
@@ -875,6 +898,21 @@ async function boot() {
       logoutWiki();
     });
   }
+
+  if (els.btnMenu) {
+    els.btnMenu.addEventListener("click", () => {
+      setDrawerOpen(!els.app.classList.contains("drawer-open"));
+    });
+  }
+  if (els.drawerScrim) {
+    els.drawerScrim.addEventListener("click", () => closeDrawer());
+  }
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeDrawer();
+  });
+  window.addEventListener("resize", () => {
+    if (!isMobileLayout()) closeDrawer();
+  });
 
   els.historyList.addEventListener("click", (e) => {
     const del = e.target.closest("[data-del]");

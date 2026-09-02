@@ -2,12 +2,12 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#186078" />
     <title>Wiki 查询助手</title>
     <link rel="icon" type="image/png" href="/icon/gdutnic.png" />
     <link rel="apple-touch-icon" href="/icon/gdutnic.png" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260901ax" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260902a" />
   </head>
   <body class="gate-body">
     <section id="wikiGate" class="wiki-gate">
@@ -32,7 +32,7 @@
           <div class="mark"><img src="/icon/gdutnic.png" alt="" /></div>
           <div>
             <h1>GDUTNIC Wiki 查询助手</h1>
-            <p class="brand-sub">Wiki 查询助手<span class="ver-chip" title="当前为早期测试版，不代表最终表现">v0.5</span></p>
+            <p class="brand-sub">Wiki 查询助手<span class="ver-chip" title="当前为早期测试版，不代表最终表现">v0.6</span></p>
           </div>
         </header>
 
@@ -50,24 +50,28 @@
         </div>
       </aside>
 
+      <button type="button" id="drawerScrim" class="drawer-scrim" hidden aria-label="关闭会话列表"></button>
       <main class="chat">
         <header class="chat-bar" id="chatBar">
-          <div>
+          <button type="button" id="btnMenu" class="btn ghost send mobile-only" aria-label="打开会话列表" aria-expanded="false">
+            <span class="menu-bars" aria-hidden="true"></span>
+          </button>
+          <div class="chat-bar-title">
             <strong id="chatTitle">新会话</strong>
           </div>
         </header>
         <div id="thread" class="thread"></div>
-        <div class="composer-dock" id="composerDock">
-          <div class="composer-blur" aria-hidden="true"></div>
-          <form id="composer" class="composer">
-            <textarea id="input" rows="1" placeholder="向知识库提问…"></textarea>
-            <button type="submit" id="btnSend" class="btn primary send" aria-label="发送">
-              <span class="md-icon" style="--md-icon:url('/icon/symbol/send_24dp_1F1F1F_FILL0_wght400_GRAD0_opsz24.svg')" aria-hidden="true"></span>
-            </button>
-          </form>
-        </div>
       </main>
+      <div class="composer-dock" id="composerDock">
+        <div class="composer-blur" aria-hidden="true"></div>
+        <form id="composer" class="composer">
+          <textarea id="input" rows="1" placeholder="向知识库提问…"></textarea>
+          <button type="submit" id="btnSend" class="btn primary send" aria-label="发送">
+            <span class="md-icon" style="--md-icon:url('/icon/symbol/send_24dp_1F1F1F_FILL0_wght400_GRAD0_opsz24.svg')" aria-hidden="true"></span>
+          </button>
+        </form>
+      </div>
     </div>
-    <script src="/static/app.js?v=20260901ax"></script>
+    <script src="/static/app.js?v=20260902a"></script>
   </body>
 </html>
