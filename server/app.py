@@ -14,7 +14,7 @@ from itsdangerous import BadSignature, URLSafeTimedSerializer
 from starlette.middleware.sessions import SessionMiddleware
 
 from server import admin_store, chat_store
-from server.chat import stream_chat
+from server.chat import stream_chat, summarize_title
 from server.mcp_client import McpError, OutlineMcpClient, normalize_mcp_url
 from server.oauth import exchange_code, start_oauth
 
@@ -314,7 +314,17 @@ async def chat(request: Request) -> StreamingResponse:
         return JSONResponse({"error": "尚未连接 Outline MCP，请先在弹窗中完成企业登录"}, status_code=401)
 
     openai_base, openai_key, model, provider = admin_store.chat_credentials()
-    messages = body.get("messages") or []
+    messages = []
+    for item in body.get("messages") or []:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or "")
+        if role not in {"user", "assistant"}:
+            continue
+        content = chat_store._trim_content(item.get("content"))
+        if content in ("", []):
+            continue
+        messages.append({"role": role, "content": content})
     if not openai_base or not openai_key or not model:
         raise HTTPException(status_code=400, detail="尚未配置模型接口，请先打开管理员界面完成设置")
     if not messages:
@@ -323,7 +333,7 @@ async def chat(request: Request) -> StreamingResponse:
     async def events():
         try:
             async with OutlineMcpClient(mcp_url, token) as mcp:
-                tools = await mcp.list_tools()
+                tools = await mcp.list_tools() if admin_store.mcp_heat() > 0 else []
                 yield _sse({"type": "mcp_ready", "tools": [t.get("name") for t in tools]})
                 async for event in stream_chat(
                     openai_base=openai_base,
@@ -334,6 +344,7 @@ async def chat(request: Request) -> StreamingResponse:
                     tools=tools,
                     provider=provider,
                     system_prompt=admin_store.system_prompt(),
+                    mcp_heat=admin_store.mcp_heat(),
                 ):
                     yield _sse(event)
         except McpError as exc:
@@ -342,6 +353,49 @@ async def chat(request: Request) -> StreamingResponse:
             yield _sse({"type": "error", "message": str(exc)})
 
     return StreamingResponse(events(), media_type="text/event-stream")
+
+
+@app.post("/api/chat/title")
+async def chat_title(request: Request) -> dict[str, str]:
+    body = await request.json()
+    openai_base, openai_key, model, provider = admin_store.chat_credentials()
+    if not openai_base or not openai_key or not model:
+        raise HTTPException(status_code=400, detail="尚未配置模型接口")
+    messages = []
+    for item in body.get("messages") or []:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or "")
+        if role not in {"user", "assistant"}:
+            continue
+        content = chat_store._trim_content(item.get("content"))
+        if isinstance(content, list):
+            texts = [
+                part
+                for part in content
+                if isinstance(part, dict) and part.get("type") == "text" and str(part.get("text") or "").strip()
+            ]
+            content = texts
+        if role != "assistant":
+            continue
+        if content in ("", []):
+            continue
+        messages.append({"role": "assistant", "content": content})
+        if len(messages) >= 2:
+            break
+    if not messages:
+        raise HTTPException(status_code=400, detail="消息不能为空")
+    try:
+        title = await summarize_title(
+            openai_base=openai_base,
+            openai_key=openai_key,
+            model=model,
+            messages=messages,
+            provider=provider,
+        )
+    except Exception:
+        title = ""
+    return {"title": title}
 
 
 def _token_from(request: Request, body: dict[str, Any]) -> str:

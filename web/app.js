@@ -33,6 +33,10 @@ const els = {
   btnNewSession: document.getElementById("btnNewSession"),
   btnLogout: document.getElementById("btnLogout"),
   btnSend: document.getElementById("btnSend"),
+  btnAttach: document.getElementById("btnAttach"),
+  imageInput: document.getElementById("imageInput"),
+  imagePreviews: document.getElementById("imagePreviews"),
+  appToast: document.getElementById("appToast"),
   btnMenu: document.getElementById("btnMenu"),
   drawerScrim: document.getElementById("drawerScrim"),
   chatBar: document.getElementById("chatBar"),
@@ -129,9 +133,12 @@ async function loadHistoryStore() {
     const res = await fetch("/api/chats");
     const packed = await res.json();
     if (res.ok && Array.isArray(packed.sessions)) {
-      sessions = packed.sessions;
+      sessions = packed.sessions.map(hydrateSession);
       currentId = packed.currentId || null;
-      if (sessions.length) return;
+      if (sessions.length) {
+        retryUntitledSessions();
+        return;
+      }
     }
   } catch {
     /* fall through */
@@ -139,13 +146,14 @@ async function loadHistoryStore() {
   try {
     const scoped = JSON.parse(localStorage.getItem(historyStorageKey()) || "null");
     if (scoped && Array.isArray(scoped.sessions) && scoped.sessions.length) {
-      sessions = scoped.sessions;
+      sessions = scoped.sessions.map(hydrateSession);
       currentId = scoped.currentId || null;
       persistHistoryStore();
+      retryUntitledSessions();
       return;
     }
     const legacy = JSON.parse(localStorage.getItem(HISTORY_KEY) || "{}");
-    sessions = Array.isArray(legacy.sessions) ? legacy.sessions : [];
+    sessions = Array.isArray(legacy.sessions) ? legacy.sessions.map(hydrateSession) : [];
     currentId = legacy.currentId || null;
   } catch {
     sessions = [];
@@ -153,15 +161,23 @@ async function loadHistoryStore() {
   }
 }
 
+function persistableSessions() {
+  return sessions.filter((s) => s.committed && (s.messages || []).length);
+}
+
 function persistHistoryStore(immediate) {
-  sessions.forEach((s) => {
+  const packed = persistableSessions();
+  packed.forEach((s) => {
     if (s.userTheme) rememberThemeCookie(s.id, s.userTheme);
   });
   const push = () =>
     fetch("/api/chats", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ currentId, sessions }),
+      body: JSON.stringify({
+        currentId: packed.some((s) => s.id === currentId) ? currentId : packed[0]?.id || "",
+        sessions: packed,
+      }),
     }).catch(() => {});
   clearTimeout(saveChatsTimer);
   if (immediate === false) {
@@ -171,10 +187,19 @@ function persistHistoryStore(immediate) {
   push();
 }
 
-function sessionTitleFrom(msgs) {
-  const first = (msgs || []).find((m) => m.role === "user");
-  const text = String(first?.content || "新会话").replace(/\s+/g, " ").trim();
-  return text.slice(0, 36) || "新会话";
+function looksLikeCopiedReply(title) {
+  const t = String(title || "").trim();
+  if (!t || t === "新会话") return true;
+  return /(我来|我帮您|根据回复|回复内容|生成一个|拟定|我们只需要|只输出|查询知识库)/.test(t);
+}
+
+function hydrateSession(raw) {
+  const rec = raw && typeof raw === "object" ? raw : {};
+  rec.committed = true;
+  const title = String(rec.title || "").trim();
+  rec.title = title || "新会话";
+  rec.titleLocked = Boolean(title && title !== "新会话" && !looksLikeCopiedReply(title));
+  return rec;
 }
 
 const USER_THEMES = [
@@ -202,7 +227,7 @@ function sortSessions() {
 function ensureSession(id) {
   let rec = sessions.find((s) => s.id === id);
   if (!rec) {
-    rec = { id, title: "新会话", messages: [], updatedAt: 0 };
+    rec = { id, title: "新会话", messages: [], updatedAt: 0, committed: false, titleLocked: false };
     sessions.push(rec);
   }
   if (!Array.isArray(rec.messages)) rec.messages = [];
@@ -242,11 +267,65 @@ function syncHistoryActive() {
 
 function markRound(id) {
   const rec = ensureSession(id);
-  rec.title = sessionTitleFrom(rec.messages);
   rec.updatedAt = Date.now();
+  if (!rec.committed) return;
   sortSessions();
   persistHistoryStore();
   renderHistory();
+}
+
+function messagesForTitle(msgs) {
+  return (msgs || [])
+    .filter((m) => m.role === "assistant")
+    .map((m) => ({ role: "assistant", content: messagePlain(m.content).trim().slice(0, 1200) }))
+    .filter((m) => m.content)
+    .slice(0, 2);
+}
+
+async function summarizeSessionTitle(id) {
+  const rec = sessions.find((s) => s.id === id);
+  if (!rec || rec.titleLocked) return;
+  const round = messagesForTitle(rec.messages);
+  if (!round.length) return;
+  let title = "";
+  try {
+    const res = await fetch("/api/chat/title", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages: round }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) title = String(data.title || "").trim();
+  } catch {
+    title = "";
+  }
+  if (!title || looksLikeCopiedReply(title)) return;
+  const latest = sessions.find((s) => s.id === id);
+  if (!latest || latest.titleLocked) return;
+  latest.title = title;
+  latest.titleLocked = true;
+  persistHistoryStore();
+  renderHistory();
+}
+
+function retryUntitledSessions() {
+  sessions
+    .filter((s) => s.committed && !s.titleLocked)
+    .forEach((s) => summarizeSessionTitle(s.id));
+}
+
+function abandonDraft(id) {
+  if (!id) return;
+  const ctrl = inflight.get(id);
+  if (ctrl) ctrl.abort();
+  inflight.delete(id);
+  sessions = sessions.filter((s) => s.id !== id);
+}
+
+function isUnsavedDraft(id) {
+  const rec = sessions.find((s) => s.id === id);
+  if (!rec || rec.committed) return false;
+  return Boolean((rec.messages || []).length || inflight.has(id));
 }
 
 function updateChatTitle() {
@@ -258,7 +337,7 @@ function updateChatTitle() {
 function renderHistory() {
   if (!els.historyList) return;
   const saved = [...sessions]
-    .filter((s) => (s.messages || []).length)
+    .filter((s) => s.committed && (s.messages || []).length)
     .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   if (!saved.length) {
     els.historyList.innerHTML = '<p class="history-empty">暂无历史会话</p>';
@@ -314,6 +393,12 @@ function closeDrawer() {
 }
 
 function startNewConversation() {
+  if (isUnsavedDraft(currentId)) {
+    abandonDraft(currentId);
+    bindCurrent(newId());
+    closeDrawer();
+    return;
+  }
   if (!messages.length && !inflight.has(currentId)) {
     if (!currentId) currentId = newId();
     persistHistoryStore();
@@ -331,6 +416,7 @@ function openSession(id) {
     closeDrawer();
     return;
   }
+  if (isUnsavedDraft(currentId)) abandonDraft(currentId);
   bindCurrent(id);
   closeDrawer();
 }
@@ -338,12 +424,10 @@ function openSession(id) {
 function deleteSession(id) {
   const ctrl = inflight.get(id);
   if (ctrl) ctrl.abort();
+  inflight.delete(id);
   sessions = sessions.filter((s) => s.id !== id);
-  if (currentId === id) {
-    bindCurrent(newId());
-    return;
-  }
-  persistHistoryStore();
+  if (currentId === id) bindCurrent(newId());
+  else persistHistoryStore();
   renderHistory();
 }
 
@@ -430,7 +514,7 @@ function showGate() {
 async function showApp() {
   if (els.wikiGate && !els.wikiGate.hidden) {
     els.wikiGate.classList.add("is-leaving");
-    await wait(260);
+    await wait(800);
     els.wikiGate.hidden = true;
     els.wikiGate.classList.remove("is-leaving");
   }
@@ -442,14 +526,330 @@ async function showApp() {
   updateComposerChrome();
 }
 
-function addMessage(role, text, extraClass, opts) {
+const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
+const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
+const MAX_IMAGES = 4;
+const COMPOSER_EXPAND_MS = 240;
+const BUTTON_FADE_MS = 180;
+const INPUT_MIN_H = 40;
+const INPUT_MAX_H = 160;
+let pendingImages = [];
+let imageSeq = 0;
+let toastTimer = 0;
+let composerAnim = Promise.resolve();
+let composerInputH = INPUT_MIN_H;
+let inputSizerEl = null;
+
+function messagePlain(content) {
+  if (typeof content === "string") return content || "";
+  if (!Array.isArray(content)) return "";
+  return content
+    .filter((part) => part && part.type === "text")
+    .map((part) => part.text || "")
+    .join("\n");
+}
+
+function hasMessageImage(content) {
+  return Array.isArray(content) && content.some((part) => part && part.type === "image_url");
+}
+
+function fillUserBubble(bubble, content) {
+  bubble.textContent = "";
+  if (typeof content === "string" || !Array.isArray(content)) {
+    bubble.textContent = messagePlain(content);
+    return;
+  }
+  content.forEach((part) => {
+    if (!part) return;
+    if (part.type === "image_url") {
+      const url = part.image_url?.url || part.url || "";
+      if (!url) return;
+      const img = document.createElement("img");
+      img.className = "msg-image";
+      img.src = url;
+      img.alt = "上传的图片";
+      bubble.appendChild(img);
+    } else if (part.type === "text" && part.text) {
+      const span = document.createElement("div");
+      span.textContent = part.text;
+      bubble.appendChild(span);
+    }
+  });
+  if (!bubble.childNodes.length) bubble.textContent = "";
+}
+
+function showToast(text) {
+  if (!els.appToast) return;
+  els.appToast.textContent = text;
+  els.appToast.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    els.appToast.hidden = true;
+  }, 2400);
+}
+
+function sniffImageType(bytes) {
+  if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xd8) return "image/jpeg";
+  if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return "image/png";
+  if (bytes.length >= 6 && bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) return "image/gif";
+  if (
+    bytes.length >= 12 &&
+    bytes[0] === 0x52 &&
+    bytes[1] === 0x49 &&
+    bytes[2] === 0x46 &&
+    bytes[3] === 0x46 &&
+    bytes[8] === 0x57 &&
+    bytes[9] === 0x45 &&
+    bytes[10] === 0x42 &&
+    bytes[11] === 0x50
+  ) {
+    return "image/webp";
+  }
+  return "";
+}
+
+function waitMs(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function queueComposerAnim(fn) {
+  const run = composerAnim.then(fn, fn);
+  composerAnim = run.catch(() => {});
+  return run;
+}
+
+function applyInputHeight(px) {
+  composerInputH = px;
+  if (els.form) els.form.style.setProperty("--input-h", `${px}px`);
+}
+
+function setComposerHasImages(on) {
+  if (els.form) els.form.classList.toggle("has-images", on);
+}
+
+function getInputSizer() {
+  if (inputSizerEl) return inputSizerEl;
+  inputSizerEl = document.createElement("div");
+  inputSizerEl.className = "composer-sizer";
+  inputSizerEl.setAttribute("aria-hidden", "true");
+  document.body.appendChild(inputSizerEl);
+  return inputSizerEl;
+}
+
+function measureInputHeight() {
+  const el = els.input;
+  if (!el) return INPUT_MIN_H;
+  const sizer = getInputSizer();
+  const cs = getComputedStyle(el);
+  const padY = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+  const linePx = parseFloat(cs.lineHeight) || 20;
+  sizer.style.width = `${el.clientWidth}px`;
+  sizer.style.fontFamily = cs.fontFamily;
+  sizer.style.fontSize = cs.fontSize;
+  sizer.style.fontWeight = cs.fontWeight;
+  sizer.style.letterSpacing = cs.letterSpacing;
+  sizer.style.lineHeight = cs.lineHeight;
+  sizer.style.padding = cs.padding;
+  sizer.style.border = "0";
+  sizer.style.boxSizing = cs.boxSizing;
+  sizer.style.whiteSpace = "pre-wrap";
+  sizer.style.wordBreak = cs.wordBreak;
+  sizer.style.overflowWrap = cs.overflowWrap;
+  sizer.textContent = el.value.endsWith("\n") ? `${el.value}\n` : el.value || " ";
+  const content = Math.max(linePx, sizer.scrollHeight - padY);
+  const lines = Math.max(1, Math.round(content / linePx));
+  return Math.min(INPUT_MAX_H, Math.max(INPUT_MIN_H, Math.round(padY + lines * linePx)));
+}
+
+async function syncComposerTextHeight() {
+  const target = measureInputHeight();
+  if (Math.abs(target - composerInputH) < 2) return;
+  return queueComposerAnim(async () => {
+    const next = measureInputHeight();
+    if (Math.abs(next - composerInputH) < 2) return;
+    await setComposerButtonsHidden(true);
+    applyInputHeight(next);
+    await waitMs(COMPOSER_EXPAND_MS);
+    await setComposerButtonsHidden(false);
+  });
+}
+
+async function setComposerButtonsHidden(hidden) {
+  if (!els.form) return;
+  els.form.classList.toggle("buttons-fading", hidden);
+  await waitMs(BUTTON_FADE_MS);
+}
+
+function renderImagePreviews() {
+  if (!els.imagePreviews) return;
+  if (!pendingImages.length) {
+    els.imagePreviews.innerHTML = "";
+    return;
+  }
+  setComposerHasImages(true);
+  els.imagePreviews.hidden = false;
+  els.imagePreviews.innerHTML = pendingImages
+    .map((item) => {
+      const loading = item.loading || !item.dataUrl;
+      const src = item.dataUrl ? ` src="${item.dataUrl}"` : "";
+      return (
+        `<div class="image-chip${loading ? " is-loading" : ""}" data-id="${item.id}">` +
+        `<span class="chip-spin" aria-hidden="true"><span class="thinking-spinner"></span></span>` +
+        `<img${src} alt="">` +
+        `<span class="chip-mask"></span>` +
+        `<button type="button" class="chip-del" data-remove="${item.id}" aria-label="移除图片">${ICON.close}</button>` +
+        `</div>`
+      );
+    })
+    .join("");
+}
+
+async function expandComposerForFirstImage() {
+  return queueComposerAnim(async () => {
+    if (!els.form || !els.imagePreviews) return;
+    if (els.form.classList.contains("has-images")) return;
+    await setComposerButtonsHidden(true);
+    els.form.classList.add("has-images");
+    els.imagePreviews.hidden = false;
+    els.imagePreviews.innerHTML = "";
+    await waitMs(COMPOSER_EXPAND_MS);
+    await setComposerButtonsHidden(false);
+  });
+}
+
+async function collapseComposerIfEmpty(opts) {
+  const stayHidden = Boolean(opts && opts.stayHidden);
+  const resetInput = Boolean(opts && opts.resetInput);
+  return queueComposerAnim(async () => {
+    if (pendingImages.length) renderImagePreviews();
+    const hideImages = !pendingImages.length && Boolean(els.form && els.form.classList.contains("has-images"));
+    const shrinkInput = resetInput && composerInputH > INPUT_MIN_H;
+    if (!hideImages && !shrinkInput) {
+      if (!pendingImages.length && els.imagePreviews) {
+        els.imagePreviews.hidden = true;
+        els.imagePreviews.innerHTML = "";
+      }
+      if (resetInput) applyInputHeight(INPUT_MIN_H);
+      return false;
+    }
+    await setComposerButtonsHidden(true);
+    if (hideImages) {
+      setComposerHasImages(false);
+      if (els.imagePreviews) {
+        els.imagePreviews.hidden = true;
+        els.imagePreviews.innerHTML = "";
+      }
+    }
+    if (resetInput) applyInputHeight(INPUT_MIN_H);
+    await waitMs(COMPOSER_EXPAND_MS);
+    if (!stayHidden) await setComposerButtonsHidden(false);
+    return stayHidden;
+  });
+}
+
+function readBlobAsDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function blobToChatDataUrl(blob, mime, byteLength) {
+  if (mime === "image/gif") return readBlobAsDataUrl(blob);
+  const maxEdge = 1280;
+  const skipResize = byteLength <= 700 * 1024;
+  try {
+    const bitmap = await createImageBitmap(blob);
+    const needScale = Math.max(bitmap.width, bitmap.height) > maxEdge;
+    if (!needScale && skipResize) {
+      bitmap.close();
+      return readBlobAsDataUrl(blob);
+    }
+    const scale = needScale ? maxEdge / Math.max(bitmap.width, bitmap.height) : 1;
+    const w = Math.max(1, Math.round(bitmap.width * scale));
+    const h = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      bitmap.close();
+      return readBlobAsDataUrl(blob);
+    }
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    bitmap.close();
+    const outType = mime === "image/png" ? "image/png" : "image/jpeg";
+    const dataUrl = canvas.toDataURL(outType, outType === "image/jpeg" ? 0.82 : 0.92);
+    return dataUrl || readBlobAsDataUrl(blob);
+  } catch {
+    return readBlobAsDataUrl(blob);
+  }
+}
+
+async function addImageFile(file) {
+  if (!file) return;
+  if (pendingImages.length >= MAX_IMAGES) {
+    showToast("一次最多 4 张图片");
+    return;
+  }
+  if (file.size > MAX_IMAGE_BYTES) {
+    showToast("图片过大");
+    return;
+  }
+  const firstImage = pendingImages.length === 0;
+  if (firstImage) await expandComposerForFirstImage();
+  const id = `img-${++imageSeq}`;
+  pendingImages.push({ id, loading: true, dataUrl: "", mime: "" });
+  renderImagePreviews();
+  try {
+    const buffer = await file.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    const sniffed = sniffImageType(bytes);
+    const mime = sniffed || (ALLOWED_IMAGE_TYPES.has(file.type) ? file.type : "");
+    if (!mime || !ALLOWED_IMAGE_TYPES.has(mime)) {
+      pendingImages = pendingImages.filter((item) => item.id !== id);
+      await collapseComposerIfEmpty();
+      showToast("图片不支持");
+      return;
+    }
+    const blob = new Blob([buffer], { type: mime });
+    const dataUrl = await blobToChatDataUrl(blob, mime, bytes.byteLength);
+    const item = pendingImages.find((entry) => entry.id === id);
+    if (!item) return;
+    item.loading = false;
+    item.dataUrl = dataUrl;
+    item.mime = mime;
+    renderImagePreviews();
+  } catch {
+    pendingImages = pendingImages.filter((item) => item.id !== id);
+    await collapseComposerIfEmpty();
+    showToast("图片不支持");
+  }
+}
+
+function buildUserContent(text) {
+  const ready = pendingImages.filter((item) => item.dataUrl && !item.loading);
+  if (!ready.length) return text;
+  const parts = ready.map((item) => ({
+    type: "image_url",
+    image_url: { url: item.dataUrl },
+  }));
+  if (text) parts.push({ type: "text", text });
+  return parts;
+}
+
+function addMessage(role, content, extraClass, opts) {
   const bubble = document.createElement("div");
   bubble.className = `msg ${role}${extraClass ? " " + extraClass : ""}`;
   if (role === "assistant") {
     bubble.classList.add("markdown");
-    bubble.innerHTML = renderMarkdown(text || "");
+    bubble.innerHTML = renderMarkdown(messagePlain(content));
+  } else if (role === "user") {
+    fillUserBubble(bubble, content);
   } else {
-    bubble.textContent = text;
+    bubble.textContent = messagePlain(content);
   }
   if (role === "user" || role === "assistant") {
     const row = document.createElement("div");
@@ -483,143 +883,6 @@ function escapeHtml(text) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
-}
-
-function inlineMarkdown(text) {
-  let html = escapeHtml(text);
-  html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
-  html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-  html = html.replace(/__([^_]+)__/g, "<strong>$1</strong>");
-  html = html.replace(/(^|[^*])\*([^*]+)\*(?!\*)/g, "$1<em>$2</em>");
-  html = html.replace(/(^|[^_])_([^_]+)_(?!_)/g, "$1<em>$2</em>");
-  html = html.replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>');
-  html = html.replace(/https:\/\/[^\s<]+/g, (url, offset, str) => {
-    const before = str.slice(Math.max(0, offset - 6), offset);
-    if (before.endsWith("href=") || before.endsWith('="') || before.endsWith("='")) {
-      return url;
-    }
-    const cleaned = url.replace(/[),.;:，。；：]+$/, "");
-    const trail = url.slice(cleaned.length);
-    return `<a href="${cleaned}" target="_blank" rel="noreferrer">${cleaned}</a>${trail}`;
-  });
-  return html;
-}
-
-function isTableRow(line) {
-  return /^\s*\|.*\|\s*$/.test(line);
-}
-
-function isTableSep(line) {
-  return /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?\s*$/.test(line);
-}
-
-function splitCells(line) {
-  return line
-    .trim()
-    .replace(/^\|/, "")
-    .replace(/\|\s*$/, "")
-    .split("|")
-    .map((cell) => cell.trim());
-}
-
-function renderTable(rows) {
-  const body = rows.filter((row) => !isTableSep(row.join("|")));
-  if (!body.length) return "";
-  const head = body[0];
-  const rest = body.slice(1);
-  const thead = `<thead><tr>${head.map((c) => `<th>${inlineMarkdown(c)}</th>`).join("")}</tr></thead>`;
-  const tbody = `<tbody>${rest
-    .map((row) => `<tr>${row.map((c) => `<td>${inlineMarkdown(c)}</td>`).join("")}</tr>`)
-    .join("")}</tbody>`;
-  return `<div class="table-wrap"><table>${thead}${tbody}</table></div>`;
-}
-
-function renderMarkdown(src) {
-  const text = (src || "").replace(/\r\n/g, "\n");
-  const fences = [];
-  const withFences = text.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
-    const i = fences.length;
-    fences.push(
-      `<pre><code class="lang-${escapeHtml(lang)}">${escapeHtml(code.replace(/\n$/, ""))}</code></pre>`
-    );
-    return `\n%%FENCE${i}%%\n`;
-  });
-  const lines = withFences.split("\n");
-  const out = [];
-  let listType = null;
-
-  const closeList = () => {
-    if (listType) {
-      out.push(listType === "ol" ? "</ol>" : "</ul>");
-      listType = null;
-    }
-  };
-
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i];
-    const fence = line.match(/^%%FENCE(\d+)%%$/);
-    if (fence) {
-      closeList();
-      out.push(fences[Number(fence[1])]);
-      continue;
-    }
-    if (isTableRow(line) && i + 1 < lines.length && isTableSep(lines[i + 1])) {
-      closeList();
-      const rows = [];
-      while (i < lines.length && (isTableRow(lines[i]) || isTableSep(lines[i]))) {
-        if (!isTableSep(lines[i])) rows.push(splitCells(lines[i]));
-        i += 1;
-      }
-      i -= 1;
-      out.push(renderTable(rows));
-      continue;
-    }
-    if (/^---+$/.test(line.trim())) {
-      closeList();
-      out.push("<hr>");
-      continue;
-    }
-    const heading = line.match(/^(#{1,6})\s+(.+)$/);
-    if (heading) {
-      closeList();
-      const level = heading[1].length;
-      out.push(`<h${level}>${inlineMarkdown(heading[2])}</h${level}>`);
-      continue;
-    }
-    const quote = line.match(/^>\s?(.*)$/);
-    if (quote) {
-      closeList();
-      out.push(`<blockquote>${inlineMarkdown(quote[1])}</blockquote>`);
-      continue;
-    }
-    const ol = line.match(/^\d+\.\s+(.+)$/);
-    if (ol) {
-      if (listType !== "ol") {
-        closeList();
-        listType = "ol";
-        out.push("<ol>");
-      }
-      out.push(`<li>${inlineMarkdown(ol[1])}</li>`);
-      continue;
-    }
-    const ul = line.match(/^[-*]\s+(.+)$/);
-    if (ul) {
-      if (listType !== "ul") {
-        closeList();
-        listType = "ul";
-        out.push("<ul>");
-      }
-      out.push(`<li>${inlineMarkdown(ul[1])}</li>`);
-      continue;
-    }
-    closeList();
-    if (!line.trim()) {
-      continue;
-    }
-    out.push(`<p>${inlineMarkdown(line)}</p>`);
-  }
-  closeList();
-  return out.join("") || "<p></p>";
 }
 
 function errorText(data) {
@@ -679,11 +942,11 @@ async function connect() {
   }
 }
 
-async function sendChat(text, sessionId, signal) {
+async function sendChat(content, sessionId, signal) {
   const rec = ensureSession(sessionId);
-  rec.messages.push({ role: "user", content: text });
+  rec.messages.push({ role: "user", content });
   markRound(sessionId);
-  if (currentId === sessionId) addMessage("user", text);
+  if (currentId === sessionId) addMessage("user", content);
 
   let thinkingChip = null;
   if (currentId === sessionId) {
@@ -726,11 +989,11 @@ async function sendChat(text, sessionId, signal) {
   };
 
   const writeAssistant = (textValue) => {
-    const row = ensureSession(sessionId);
+    const row = sessions.find((s) => s.id === sessionId);
+    if (!row) return;
     const last = row.messages[row.messages.length - 1];
     if (last && last.role === "assistant") last.content = textValue;
     else row.messages.push({ role: "assistant", content: textValue });
-    persistHistoryStore(false);
     if (currentId === sessionId) {
       showAssistant();
       if (assistant) assistant.innerHTML = renderMarkdown(textValue);
@@ -768,16 +1031,25 @@ async function sendChat(text, sessionId, signal) {
       }
     }
   } catch (err) {
-    if (full) writeAssistant(full);
+    if (full && sessions.some((s) => s.id === sessionId)) writeAssistant(full);
     throw err;
   }
 
+  if (!sessions.some((s) => s.id === sessionId)) return;
   if (!full) {
     const fallback = "（模型没有返回文本）";
     writeAssistant(fallback);
   } else {
     writeAssistant(full);
   }
+  const done = sessions.find((s) => s.id === sessionId);
+  if (!done) return;
+  done.committed = true;
+  done.updatedAt = Date.now();
+  sortSessions();
+  persistHistoryStore();
+  renderHistory();
+  summarizeSessionTitle(sessionId);
 }
 
 function updateComposerChrome() {
@@ -797,13 +1069,68 @@ function onThreadScroll() {
   }, 500);
 }
 
+let oauthPending = false;
+let oauthResetTimer = 0;
+const OAUTH_LABEL = "网协认证登陆";
+
+function setOauthLabel(text) {
+  const span = els.btnOauth?.querySelector(".text");
+  if (!span || span.textContent === text) return;
+  span.style.opacity = "0";
+  setTimeout(() => {
+    if (!els.btnOauth) return;
+    span.textContent = text;
+    span.style.opacity = "1";
+  }, 250);
+}
+
+function setOauthActive(on) {
+  oauthPending = on;
+  if (!els.btnOauth) return;
+  const btn = els.btnOauth;
+  if (!on && btn.classList.contains("is-error")) {
+    btn.classList.add("is-leaving-error");
+    btn.classList.remove("is-error", "is-active");
+    setOauthLabel(OAUTH_LABEL);
+    btn.setAttribute("aria-busy", "false");
+    setTimeout(() => {
+      btn.classList.remove("is-leaving-error");
+    }, 800);
+    return;
+  }
+  btn.classList.toggle("is-active", on);
+  btn.classList.remove("is-error", "is-leaving-error");
+  setOauthLabel(on ? "登陆中" : OAUTH_LABEL);
+  btn.setAttribute("aria-busy", on ? "true" : "false");
+}
+
+function failOauthButton() {
+  oauthPending = true;
+  if (!els.btnOauth) {
+    oauthPending = false;
+    return;
+  }
+  els.btnOauth.classList.remove("is-leaving-error");
+  els.btnOauth.classList.add("is-active", "is-error");
+  setOauthLabel("登陆失败");
+  els.btnOauth.setAttribute("aria-busy", "false");
+  clearTimeout(oauthResetTimer);
+  oauthResetTimer = setTimeout(() => {
+    setOauthActive(false);
+  }, 2500);
+}
+
 function startOauth() {
+  if (oauthPending) return;
+  clearTimeout(oauthResetTimer);
+  setOauthActive(true);
   const popup = window.open(
     "/api/mcp/oauth/start",
     "outline-oauth",
     "width=520,height=740,menubar=no,toolbar=no,status=no"
   );
   if (!popup) {
+    failOauthButton();
     setStatus("浏览器拦截了登录弹窗，请允许本站弹出窗口后重试", "bad");
     return;
   }
@@ -817,13 +1144,21 @@ function startOauth() {
       .then((d) => {
         if (d.oauth_connected || d.has_outline_token || loadAuth()?.access_token) {
           setStatus("企业登录成功，正在连接知识库…", "ok");
-          return applyLogin(d).then(() => connect()).then(() => showApp());
+          return applyLogin(d)
+            .then(() => connect())
+            .then(() => showApp())
+            .catch((err) => {
+              failOauthButton();
+              setStatus(err.message || "连接知识库失败", "bad");
+            });
         }
         if (!document.body.classList.contains("wiki-ready")) {
+          failOauthButton();
           setStatus("登录未完成，请再试一次", "bad");
         }
       })
       .catch(() => {
+        failOauthButton();
         setStatus("无法确认登录状态，请再试一次", "bad");
       });
   }, 600);
@@ -848,6 +1183,7 @@ async function boot() {
         .then(() => connect())
         .then(() => showApp())
         .catch((err) => {
+          failOauthButton();
           setStatus(err.message || "连接知识库失败", "bad");
         });
       return;
@@ -859,6 +1195,7 @@ async function boot() {
       state: "登录校验失败，请再试一次",
       token: "登录换票失败：" + (data.message || ""),
     };
+    failOauthButton();
     setStatus(map[data.status] || "登录未完成", "bad");
   });
 
@@ -875,6 +1212,7 @@ async function boot() {
         await showApp();
       } catch (err) {
         showGate();
+        setOauthActive(false);
         setStatus(err.message || "知识库未连接，请重新登录", "bad");
       }
     } else {
@@ -936,14 +1274,24 @@ async function boot() {
       return;
     }
     const text = els.input.value.trim();
-    if (!text) return;
+    if (pendingImages.some((item) => item.loading)) return;
+    if (!text && !pendingImages.some((item) => item.dataUrl)) return;
+    const content = buildUserContent(text);
     els.input.value = "";
+    pendingImages = [];
+    const keptHidden = await collapseComposerIfEmpty({ stayHidden: true, resetInput: true });
     const ctrl = new AbortController();
     inflight.set(sessionId, ctrl);
     setSending(true);
+    if (keptHidden) await setComposerButtonsHidden(false);
     try {
-      await sendChat(text, sessionId, ctrl.signal);
+      await sendChat(content, sessionId, ctrl.signal);
     } catch (err) {
+      if (!sessions.some((s) => s.id === sessionId)) return;
+      const rec = sessions.find((s) => s.id === sessionId);
+      if (rec && !rec.committed) {
+        rec.messages = (rec.messages || []).filter((m) => m.role !== "assistant");
+      }
       if (currentId !== sessionId) return;
       if (err.name === "AbortError") {
         addMessage("error", "已中止当前回复", "error");
@@ -961,6 +1309,42 @@ async function boot() {
       e.preventDefault();
       els.form.requestSubmit();
     }
+  });
+  els.input.addEventListener("input", () => {
+    syncComposerTextHeight();
+  });
+
+  if (els.btnAttach && els.imageInput) {
+    els.btnAttach.addEventListener("click", () => els.imageInput.click());
+    els.imageInput.addEventListener("change", async () => {
+      const files = [...(els.imageInput.files || [])];
+      els.imageInput.value = "";
+      for (const file of files) await addImageFile(file);
+    });
+  }
+  if (els.imagePreviews) {
+    els.imagePreviews.addEventListener("click", (event) => {
+      const btn = event.target.closest("[data-remove]");
+      if (!btn) return;
+      const id = btn.dataset.remove;
+      pendingImages = pendingImages.filter((item) => item.id !== id);
+      collapseComposerIfEmpty();
+    });
+  }
+  els.form.addEventListener("paste", async (event) => {
+    const files = [...(event.clipboardData?.items || [])]
+      .map((item) => (item.kind === "file" ? item.getAsFile() : null))
+      .filter(Boolean);
+    if (!files.length) return;
+    event.preventDefault();
+    for (const file of files) await addImageFile(file);
+  });
+  els.form.addEventListener("dragover", (event) => {
+    event.preventDefault();
+  });
+  els.form.addEventListener("drop", async (event) => {
+    event.preventDefault();
+    for (const file of [...(event.dataTransfer?.files || [])]) await addImageFile(file);
   });
 }
 

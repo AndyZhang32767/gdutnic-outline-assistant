@@ -7,7 +7,7 @@
     <title>Wiki 查询助手</title>
     <link rel="icon" type="image/png" href="/icon/gdutnic.png" />
     <link rel="apple-touch-icon" href="/icon/gdutnic.png" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260902a" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260902v" />
   </head>
   <body class="gate-body">
     <section id="wikiGate" class="wiki-gate">
@@ -15,14 +15,12 @@
       <h1>欢迎使用网协Wiki助手</h1>
       <p class="hint" id="gateStatus"></p>
       <button type="button" id="btnOauth" class="animated-button">
-        <svg class="arr-2" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-          <path d="M16.1716 10.9999L10.8076 5.63589L12.2218 4.22168L20 11.9999L12.2218 19.778L10.8076 18.3638L16.1716 12.9999H4V10.9999H16.1716Z"></path>
-        </svg>
+        <span class="arr-2 oauth-icon md-icon" style="--md-icon:url('/icon/symbol/arrow_24dp_1F1F1F_FILL0_wght400_GRAD0_opsz24.svg')" aria-hidden="true"></span>
+        <span class="oauth-x oauth-icon md-icon" style="--md-icon:url('/icon/symbol/close_24dp_1F1F1F_FILL0_wght400_GRAD0_opsz24.svg')" aria-hidden="true"></span>
         <span class="text">网协认证登陆</span>
         <span class="circle"></span>
-        <svg class="arr-1" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-          <path d="M16.1716 10.9999L10.8076 5.63589L12.2218 4.22168L20 11.9999L12.2218 19.778L10.8076 18.3638L16.1716 12.9999H4V10.9999H16.1716Z"></path>
-        </svg>
+        <span class="error-wash" aria-hidden="true"></span>
+        <span class="arr-1 oauth-icon md-icon" style="--md-icon:url('/icon/symbol/arrow_24dp_1F1F1F_FILL0_wght400_GRAD0_opsz24.svg')" aria-hidden="true"></span>
       </button>
     </section>
 
@@ -32,7 +30,7 @@
           <div class="mark"><img src="/icon/gdutnic.png" alt="" /></div>
           <div>
             <h1>GDUTNIC Wiki 查询助手</h1>
-            <p class="brand-sub">Wiki 查询助手<span class="ver-chip" title="当前为早期测试版，不代表最终表现">v0.6</span></p>
+            <p class="brand-sub">Wiki 查询助手<span class="ver-chip" title="当前为早期测试版，不代表最终表现">v0.7</span></p>
           </div>
         </header>
 
@@ -65,13 +63,22 @@
       <div class="composer-dock" id="composerDock">
         <div class="composer-blur" aria-hidden="true"></div>
         <form id="composer" class="composer">
-          <textarea id="input" rows="1" placeholder="向知识库提问…"></textarea>
-          <button type="submit" id="btnSend" class="btn primary send" aria-label="发送">
-            <span class="md-icon" style="--md-icon:url('/icon/symbol/send_24dp_1F1F1F_FILL0_wght400_GRAD0_opsz24.svg')" aria-hidden="true"></span>
-          </button>
+          <div id="imagePreviews" class="image-previews" hidden></div>
+          <div class="composer-row">
+            <button type="button" id="btnAttach" class="btn ghost send" aria-label="上传图片" title="上传图片">
+              <span class="md-icon" style="--md-icon:url('/icon/symbol/image_24dp_1F1F1F_FILL0_wght400_GRAD0_opsz24.svg')" aria-hidden="true"></span>
+            </button>
+            <input id="imageInput" type="file" accept="image/jpeg,image/png,image/gif,image/webp" multiple hidden />
+            <textarea id="input" rows="1" placeholder="向知识库提问…"></textarea>
+            <button type="submit" id="btnSend" class="btn primary send" aria-label="发送">
+              <span class="md-icon" style="--md-icon:url('/icon/symbol/send_24dp_1F1F1F_FILL0_wght400_GRAD0_opsz24.svg')" aria-hidden="true"></span>
+            </button>
+          </div>
         </form>
       </div>
     </div>
-    <script src="/static/app.js?v=20260902a"></script>
+    <p id="appToast" class="app-toast" hidden role="status"></p>
+    <script src="/static/markdown.js?v=20260903a"></script>
+    <script src="/static/app.js?v=20260903e"></script>
   </body>
 </html>

@@ -12,6 +12,51 @@ _LOCK = threading.Lock()
 MAX_SESSIONS = 80
 MAX_MESSAGES = 240
 MAX_CONTENT = 20000
+MAX_IMAGE_URL = 6_000_000
+ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+
+
+def _plain_content(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(
+            str(part.get("text") or "")
+            for part in content
+            if isinstance(part, dict) and part.get("type") == "text"
+        )
+    return ""
+
+
+def _trim_image_url(url: str) -> str:
+    raw = str(url or "").strip()
+    if not raw.startswith("data:"):
+        return ""
+    header, _, data = raw.partition(",")
+    mime = header[5:].split(";")[0].strip().lower()
+    if mime not in ALLOWED_IMAGE_TYPES or not data or len(raw) > MAX_IMAGE_URL:
+        return ""
+    return raw
+
+
+def _trim_content(content: Any) -> Any:
+    if isinstance(content, list):
+        parts: list[dict[str, Any]] = []
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            if part.get("type") == "text":
+                text = str(part.get("text") or "")[:MAX_CONTENT]
+                if text:
+                    parts.append({"type": "text", "text": text})
+            elif part.get("type") == "image_url":
+                src = part.get("image_url")
+                url = src.get("url") if isinstance(src, dict) else part.get("url")
+                cleaned = _trim_image_url(str(url or ""))
+                if cleaned:
+                    parts.append({"type": "image_url", "image_url": {"url": cleaned}})
+        return parts
+    return str(content or "")[:MAX_CONTENT]
 
 
 def _empty() -> dict[str, Any]:
@@ -49,7 +94,9 @@ def _trim_session(raw: dict[str, Any]) -> dict[str, Any] | None:
         role = str(item.get("role") or "")
         if role not in {"user", "assistant"}:
             continue
-        content = str(item.get("content") or "")[:MAX_CONTENT]
+        content = _trim_content(item.get("content"))
+        if content == []:
+            continue
         messages.append({"role": role, "content": content})
         if len(messages) >= MAX_MESSAGES:
             break
@@ -138,7 +185,7 @@ def save_visitor_chats(visitor_id: str, sessions: list[Any], current_id: str | N
         if not isinstance(item, dict):
             continue
         row = _trim_session(item)
-        if row:
+        if row and row.get("messages"):
             cleaned.append(row)
     cleaned.sort(key=lambda row: int(row.get("updatedAt") or 0), reverse=True)
     cleaned = cleaned[:MAX_SESSIONS]
@@ -189,7 +236,7 @@ def list_all() -> list[dict[str, Any]]:
                     "message_count": len(messages),
                     "preview": next(
                         (
-                            str(m.get("content") or "")[:80]
+                            _plain_content(m.get("content"))[:80]
                             for m in messages
                             if isinstance(m, dict) and m.get("role") == "user"
                         ),

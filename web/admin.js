@@ -28,8 +28,8 @@ const PROVIDERS = [
     name: "DeepSeek",
     base: "https://api.deepseek.com",
     keyHint: "sk-...",
-    models: ["deepseek-v4-flash", "deepseek-v4-pro"],
-    hint: "DeepSeek 官方 OpenAI 兼容接口。",
+    models: ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"],
+    hint: "官方 OpenAI 兼容接口。发图时会自动改用 deepseek-v4-flash-vision-exp，仅支持 JPEG/PNG/GIF/WebP（按文件内容识别）。",
   },
   {
     id: "qwen",
@@ -111,6 +111,9 @@ const els = {
   mcpKey: document.getElementById("mcpKey"),
   mcpStatus: document.getElementById("mcpStatus"),
   btnSaveMcp: document.getElementById("btnSaveMcp"),
+  mcpHeat: document.getElementById("mcpHeat"),
+  mcpHeatValue: document.getElementById("mcpHeatValue"),
+  mcpHeatHint: document.getElementById("mcpHeatHint"),
   provider: document.getElementById("provider"),
   openaiBase: document.getElementById("openaiBase"),
   openaiKey: document.getElementById("openaiKey"),
@@ -150,6 +153,31 @@ function escapeHtml(text) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+function plainContent(content) {
+  if (typeof content === "string") return content || "";
+  if (!Array.isArray(content)) return "";
+  return content
+    .filter((part) => part && part.type === "text")
+    .map((part) => part.text || "")
+    .join("\n");
+}
+
+function userMessageHtml(content) {
+  if (typeof content === "string" || !Array.isArray(content)) return escapeHtml(plainContent(content));
+  return content
+    .map((part) => {
+      if (!part) return "";
+      if (part.type === "image_url") {
+        const url = part.image_url?.url || "";
+        if (!url.startsWith("data:image/")) return "";
+        return `<img class="msg-image" src="${escapeHtml(url)}" alt="">`;
+      }
+      if (part.type === "text") return `<div>${escapeHtml(part.text || "")}</div>`;
+      return "";
+    })
+    .join("");
 }
 
 function formatTime(ts) {
@@ -287,8 +315,8 @@ async function openChatRecord(visitorId, chatId) {
         const isUser = m.role === "user";
         const icon = isUser ? userIcon : serverIcon;
         const bubble = isUser
-          ? `<div class="msg user">${escapeHtml(m.content || "")}</div>`
-          : `<div class="msg assistant markdown">${escapeHtml(m.content || "").replace(/\n/g, "<br>")}</div>`;
+          ? `<div class="msg user">${userMessageHtml(m.content)}</div>`
+          : `<div class="msg assistant markdown">${renderMarkdown(plainContent(m.content))}</div>`;
         const avatar = `<span class="msg-avatar" aria-hidden="true"><span class="md-icon" style="--md-icon:url('${icon}')"></span></span>`;
         return isUser
           ? `<div class="msg-row user">${bubble}${avatar}</div>`
@@ -604,20 +632,48 @@ async function loadMcp() {
   if (!res.ok) throw new Error(errorText(data));
   els.mcpUrl.value = data.mcp_url || "";
   els.mcpKey.value = data.mcp_api_key || "";
+  setMcpHeat(data.mcp_heat);
 }
 
 async function saveMcp() {
+  const heat = parseMcpHeat(els.mcpHeat?.value, 50);
   const res = await fetch("/api/admin/mcp", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       mcp_url: els.mcpUrl.value.trim(),
       mcp_api_key: els.mcpKey.value,
+      mcp_heat: heat,
     }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(errorText(data));
+  await loadMcp();
   els.mcpStatus.textContent = "已保存";
+}
+
+function mcpHeatHint(value) {
+  if (value <= 0) return "不调用知识库，直接作答";
+  if (value < 35) return "少检索，尽快结束";
+  if (value < 75) return "检索到相关文档后即可作答";
+  return "充分检索，必要时阅读多篇文档";
+}
+
+function parseMcpHeat(value, fallback = 50) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(0, minHeat(n));
+}
+
+function minHeat(n) {
+  return Math.min(100, Math.round(n));
+}
+
+function setMcpHeat(value) {
+  const n = parseMcpHeat(value, 50);
+  if (els.mcpHeat) els.mcpHeat.value = String(n);
+  if (els.mcpHeatValue) els.mcpHeatValue.textContent = String(n);
+  if (els.mcpHeatHint) els.mcpHeatHint.textContent = mcpHeatHint(n);
 }
 
 async function loadWorkspace(username, { fromAuth = true } = {}) {
@@ -711,6 +767,9 @@ async function boot() {
       els.mcpStatus.textContent = err.message;
     });
   });
+  if (els.mcpHeat) {
+    els.mcpHeat.addEventListener("input", () => setMcpHeat(els.mcpHeat.value));
+  }
 
   els.btnLogout.addEventListener("click", async () => {
     await fetch("/api/admin/logout", { method: "POST" });

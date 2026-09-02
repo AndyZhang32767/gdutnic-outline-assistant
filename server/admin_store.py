@@ -48,6 +48,7 @@ def _empty() -> dict[str, Any]:
         "mcp": {
             "mcp_url": "",
             "mcp_api_key": "",
+            "mcp_heat": 50,
         },
     }
 
@@ -237,6 +238,21 @@ def model_public() -> dict[str, Any]:
     }
 
 
+def clamp_mcp_heat(value: Any) -> int:
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        n = 50
+    return max(0, min(100, n))
+
+
+def mcp_heat() -> int:
+    mcp = mcp_config()
+    if "mcp_heat" in mcp:
+        return clamp_mcp_heat(mcp.get("mcp_heat"))
+    return clamp_mcp_heat(model_config().get("mcp_heat", 50))
+
+
 def chat_credentials() -> tuple[str, str, str, str]:
     model = model_config()
     return (
@@ -265,6 +281,7 @@ def mcp_public() -> dict[str, Any]:
     return {
         "mcp_url": mcp.get("mcp_url") or "",
         "mcp_api_key": key,
+        "mcp_heat": mcp_heat(),
         "has_key": bool(str(key).strip()),
     }
 
@@ -283,5 +300,10 @@ def save_mcp(body: dict[str, Any]) -> dict[str, Any]:
             mcp["mcp_api_key"] = key
         elif key == "":
             mcp["mcp_api_key"] = ""
+    if "mcp_heat" in body:
+        mcp["mcp_heat"] = clamp_mcp_heat(body.get("mcp_heat"))
+        model = data.get("model")
+        if isinstance(model, dict):
+            model.pop("mcp_heat", None)
     save(data)
     return mcp_public()

@@ -120,7 +120,7 @@ class OutlineMcpClient:
                     {
                         "protocolVersion": version,
                         "capabilities": {"tools": {}},
-                        "clientInfo": {"name": "gdutnic-agent", "version": "1.0.0"},
+                        "clientInfo": {"name": "gdutnic-agent", "version": "0.7.0"},
                     },
                 )
                 break
