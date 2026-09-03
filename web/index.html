@@ -7,7 +7,7 @@
     <title>Wiki 查询助手</title>
     <link rel="icon" type="image/png" href="/icon/gdutnic.png" />
     <link rel="apple-touch-icon" href="/icon/gdutnic.png" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260902v" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260903f" />
   </head>
   <body class="gate-body">
     <section id="wikiGate" class="wiki-gate">
@@ -59,23 +59,23 @@
           </div>
         </header>
         <div id="thread" class="thread"></div>
+        <div class="composer-dock" id="composerDock">
+          <div class="composer-blur" aria-hidden="true"></div>
+          <form id="composer" class="composer">
+            <div id="imagePreviews" class="image-previews" hidden></div>
+            <div class="composer-row">
+              <button type="button" id="btnAttach" class="btn ghost send" aria-label="上传图片" title="上传图片">
+                <span class="md-icon" style="--md-icon:url('/icon/symbol/image_24dp_1F1F1F_FILL0_wght400_GRAD0_opsz24.svg')" aria-hidden="true"></span>
+              </button>
+              <input id="imageInput" type="file" accept="image/jpeg,image/png,image/gif,image/webp" multiple hidden />
+              <textarea id="input" rows="1" placeholder="向知识库提问…"></textarea>
+              <button type="submit" id="btnSend" class="btn primary send" aria-label="发送">
+                <span class="md-icon" style="--md-icon:url('/icon/symbol/send_24dp_1F1F1F_FILL0_wght400_GRAD0_opsz24.svg')" aria-hidden="true"></span>
+              </button>
+            </div>
+          </form>
+        </div>
       </main>
-      <div class="composer-dock" id="composerDock">
-        <div class="composer-blur" aria-hidden="true"></div>
-        <form id="composer" class="composer">
-          <div id="imagePreviews" class="image-previews" hidden></div>
-          <div class="composer-row">
-            <button type="button" id="btnAttach" class="btn ghost send" aria-label="上传图片" title="上传图片">
-              <span class="md-icon" style="--md-icon:url('/icon/symbol/image_24dp_1F1F1F_FILL0_wght400_GRAD0_opsz24.svg')" aria-hidden="true"></span>
-            </button>
-            <input id="imageInput" type="file" accept="image/jpeg,image/png,image/gif,image/webp" multiple hidden />
-            <textarea id="input" rows="1" placeholder="向知识库提问…"></textarea>
-            <button type="submit" id="btnSend" class="btn primary send" aria-label="发送">
-              <span class="md-icon" style="--md-icon:url('/icon/symbol/send_24dp_1F1F1F_FILL0_wght400_GRAD0_opsz24.svg')" aria-hidden="true"></span>
-            </button>
-          </div>
-        </form>
-      </div>
     </div>
     <p id="appToast" class="app-toast" hidden role="status"></p>
     <script src="/static/markdown.js?v=20260903a"></script>

@@ -47,9 +47,6 @@ html, body {
 .panel {
   grid-area: nav;
 }
-.chat {
-  grid-area: main;
-}
 .app[hidden] {
   display: none !important;
 }
@@ -897,11 +894,11 @@ textarea { resize: vertical; min-height: 56px; }
 }
 
 .composer-dock {
-  grid-area: main;
-  align-self: end;
-  justify-self: stretch;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
   z-index: 15;
-  position: relative;
   margin: 0 24px 24px;
   pointer-events: none;
 }
