@@ -3,3 +3,4 @@ uvicorn[standard]==0.34.2
 httpx==0.28.1
 python-multipart==0.0.20
 itsdangerous==2.2.0
+qq-botpy>=1.2.0

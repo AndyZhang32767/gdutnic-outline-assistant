@@ -1,15 +1,12 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import secrets
 import string
-from pathlib import Path
 from typing import Any
 
-ROOT = Path(__file__).resolve().parent.parent
-DATA = ROOT / "data"
-STORE_PATH = DATA / "admin.json"
+from server import db
+
 ALPHABET = string.ascii_lowercase + string.digits
 ITERATIONS = 180_000
 
@@ -49,34 +46,72 @@ def _empty() -> dict[str, Any]:
             "mcp_url": "",
             "mcp_api_key": "",
             "mcp_heat": 50,
+            "outline_access_token": "",
+            "outline_refresh_token": "",
+            "oauth_meta": {},
+        },
+        "qq": {
+            "app_id": "",
+            "app_secret": "",
+            "enabled": False,
         },
     }
 
 
 def load() -> dict[str, Any]:
-    DATA.mkdir(parents=True, exist_ok=True)
-    if not STORE_PATH.exists():
-        data = _empty()
-        save(data)
-        return data
-    try:
-        data = json.loads(STORE_PATH.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        data = _empty()
-        save(data)
-        return data
+    with db.read() as conn:
+        stored_path = db.get_setting(conn, "path", "")
+        data = {
+            "path": stored_path,
+            "username": str(db.get_setting(conn, "username", "") or ""),
+            "password": str(db.get_setting(conn, "password", "") or ""),
+            "users": [
+                {"username": str(row["username"] or ""), "password": str(row["password"] or "")}
+                for row in conn.execute("SELECT username, password FROM users ORDER BY username")
+            ],
+            "model": db.get_setting(conn, "model", {}) or {},
+            "mcp": db.get_setting(conn, "mcp", {}) or {},
+            "qq": db.get_setting(conn, "qq", {}) or {},
+        }
+    dirty = False
     if not isinstance(data.get("path"), str) or len(data["path"]) != 8:
         data["path"] = _new_path()
-        save(data)
-    data.setdefault("model", _empty()["model"])
-    data.setdefault("mcp", _empty()["mcp"])
+        dirty = True
+    if not isinstance(data.get("model"), dict):
+        data["model"] = {}
+        dirty = True
+    if not isinstance(data.get("mcp"), dict):
+        data["mcp"] = {}
+        dirty = True
+    if not isinstance(data.get("qq"), dict):
+        data["qq"] = {}
+        dirty = True
+    for section in ("model", "mcp", "qq"):
+        for key, value in _empty()[section].items():
+            if key not in data[section]:
+                data[section][key] = value
+                dirty = True
     _ensure_users(data)
+    if dirty or not stored_path:
+        save(data)
     return data
 
 
 def save(data: dict[str, Any]) -> None:
-    DATA.mkdir(parents=True, exist_ok=True)
-    STORE_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    users = _ensure_users(data)
+    with db.write() as conn:
+        db.set_setting(conn, "path", str(data.get("path") or ""))
+        db.set_setting(conn, "username", str(data.get("username") or ""))
+        db.set_setting(conn, "password", str(data.get("password") or ""))
+        db.set_setting(conn, "model", data.get("model") if isinstance(data.get("model"), dict) else {})
+        db.set_setting(conn, "mcp", data.get("mcp") if isinstance(data.get("mcp"), dict) else {})
+        db.set_setting(conn, "qq", data.get("qq") if isinstance(data.get("qq"), dict) else {})
+        conn.execute("DELETE FROM users")
+        for item in users:
+            name = str(item.get("username") or "").strip()
+            password = str(item.get("password") or "")
+            if name:
+                conn.execute("INSERT INTO users(username, password) VALUES(?, ?)", (name, password))
 
 
 def path() -> str:
@@ -275,14 +310,87 @@ def mcp_api_key() -> str:
     return (mcp_config().get("mcp_api_key") or "").strip()
 
 
+def oauth_tokens() -> dict[str, Any]:
+    mcp = mcp_config()
+    meta = mcp.get("oauth_meta") if isinstance(mcp.get("oauth_meta"), dict) else {}
+    return {
+        "access_token": str(mcp.get("outline_access_token") or "").strip(),
+        "refresh_token": str(mcp.get("outline_refresh_token") or "").strip(),
+        "oauth_meta": dict(meta),
+    }
+
+
+def oauth_connected() -> bool:
+    return bool(oauth_tokens()["access_token"])
+
+
+def mcp_oauth_token() -> str:
+    return oauth_tokens()["access_token"]
+
+
+def save_oauth(access: str, refresh: str | None = None, meta: dict[str, Any] | None = None) -> dict[str, Any]:
+    data = load()
+    mcp = data.setdefault("mcp", _empty()["mcp"])
+    mcp["outline_access_token"] = str(access or "").strip()
+    if refresh is not None:
+        refresh_s = str(refresh or "").strip()
+        if refresh_s:
+            mcp["outline_refresh_token"] = refresh_s
+        elif refresh == "":
+            mcp["outline_refresh_token"] = ""
+    if meta:
+        mcp["oauth_meta"] = {
+            "token_endpoint": str(meta.get("token_endpoint") or ""),
+            "client_id": str(meta.get("client_id") or ""),
+            "client_secret": str(meta.get("client_secret") or ""),
+            "mcp_url": str(meta.get("mcp_url") or mcp.get("mcp_url") or ""),
+        }
+    save(data)
+    return mcp_public()
+
+
+def clear_oauth() -> dict[str, Any]:
+    data = load()
+    mcp = data.setdefault("mcp", _empty()["mcp"])
+    mcp["outline_access_token"] = ""
+    mcp["outline_refresh_token"] = ""
+    mcp["oauth_meta"] = {}
+    save(data)
+    return mcp_public()
+
+
+async def refresh_mcp_oauth() -> str:
+    from server.oauth import refresh_access_token
+
+    stored = oauth_tokens()
+    refresh = stored["refresh_token"]
+    meta = stored["oauth_meta"]
+    if not refresh or not str(meta.get("token_endpoint") or "").strip():
+        raise RuntimeError("知识库登录已过期，请在管理员界面重新点击「网协认证登陆」")
+    tokens = await refresh_access_token(
+        token_endpoint=str(meta.get("token_endpoint") or ""),
+        client_id=str(meta.get("client_id") or ""),
+        client_secret=str(meta.get("client_secret") or ""),
+        refresh_token=refresh,
+        mcp_url=str(meta.get("mcp_url") or mcp_url()),
+    )
+    access = str(
+        tokens.get("access_token")
+        or (tokens.get("data") or {}).get("access_token")
+        or ""
+    ).strip()
+    if not access:
+        raise RuntimeError("刷新知识库登录失败，请在管理员界面重新登录")
+    save_oauth(access, tokens.get("refresh_token") or refresh, meta)
+    return access
+
+
 def mcp_public() -> dict[str, Any]:
     mcp = mcp_config()
-    key = mcp.get("mcp_api_key") or ""
     return {
         "mcp_url": mcp.get("mcp_url") or "",
-        "mcp_api_key": key,
         "mcp_heat": mcp_heat(),
-        "has_key": bool(str(key).strip()),
+        "oauth_connected": oauth_connected(),
     }
 
 
@@ -294,12 +402,6 @@ def save_mcp(body: dict[str, Any]) -> dict[str, Any]:
     if "mcp_url" in body:
         raw = str(body.get("mcp_url") or "").strip()
         mcp["mcp_url"] = normalize_mcp_url(raw) if raw else ""
-    if "mcp_api_key" in body:
-        key = str(body.get("mcp_api_key") or "")
-        if key and not set(key) <= {"•"}:
-            mcp["mcp_api_key"] = key
-        elif key == "":
-            mcp["mcp_api_key"] = ""
     if "mcp_heat" in body:
         mcp["mcp_heat"] = clamp_mcp_heat(body.get("mcp_heat"))
         model = data.get("model")
@@ -307,3 +409,40 @@ def save_mcp(body: dict[str, Any]) -> dict[str, Any]:
             model.pop("mcp_heat", None)
     save(data)
     return mcp_public()
+
+
+def qq_config() -> dict[str, Any]:
+    cfg = dict(load().get("qq") or {})
+    defaults = _empty()["qq"]
+    for key, value in defaults.items():
+        cfg.setdefault(key, value)
+    return cfg
+
+
+def qq_public() -> dict[str, Any]:
+    qq = qq_config()
+    secret = str(qq.get("app_secret") or "")
+    return {
+        "app_id": str(qq.get("app_id") or "").strip(),
+        "app_secret": secret,
+        "has_secret": bool(secret.strip()),
+        "enabled": bool(qq.get("enabled")),
+        "oauth_connected": oauth_connected(),
+    }
+
+
+def save_qq(body: dict[str, Any]) -> dict[str, Any]:
+    data = load()
+    qq = data.setdefault("qq", _empty()["qq"])
+    if "app_id" in body:
+        qq["app_id"] = str(body.get("app_id") or "").strip()
+    if "app_secret" in body:
+        secret = str(body.get("app_secret") or "")
+        if secret and not set(secret) <= {"•"}:
+            qq["app_secret"] = secret
+        elif secret == "":
+            qq["app_secret"] = ""
+    if "enabled" in body:
+        qq["enabled"] = bool(body.get("enabled"))
+    save(data)
+    return qq_public()

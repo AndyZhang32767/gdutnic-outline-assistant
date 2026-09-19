@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#186078" />
     <title>管理员 · Wiki 查询助手</title>
     <link rel="icon" type="image/png" href="/icon/gdutnic.png" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260903c" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260918a" />
   </head>
   <body class="admin-body">
     <section id="authCard" class="admin-board">
@@ -41,6 +41,7 @@
         <nav>
           <button type="button" class="ga-nav-item active" data-page="model">模型接口</button>
           <button type="button" class="ga-nav-item" data-page="mcp">知识库 MCP</button>
+          <button type="button" class="ga-nav-item" data-page="qq">QQ 机器人</button>
           <button type="button" class="ga-nav-item" data-page="chats">对话记录</button>
           <button type="button" class="ga-nav-item" data-page="account">管理员账号设置</button>
         </nav>
@@ -102,10 +103,20 @@
               网协 MCP 地址
               <input id="mcpUrl" spellcheck="false" placeholder="https://知识库域名 或 https://知识库域名/mcp" />
             </label>
-            <label>
-              Outline API Key（可选）
-              <input id="mcpKey" type="password" placeholder="一般不用填，优先用弹窗登录" />
-            </label>
+            <div class="admin-oauth">
+              <p class="md-switch-title">知识库登录</p>
+              <p class="hint">与网页相同的「网协认证登陆」。登录后 QQ 机器人用此账号检索知识库。</p>
+              <button type="button" id="btnMcpOauth" class="animated-button">
+                <span class="arr-2 oauth-icon md-icon" style="--md-icon:url('/icon/symbol/arrow_24dp_1F1F1F_FILL0_wght400_GRAD0_opsz24.svg')" aria-hidden="true"></span>
+                <span class="oauth-x oauth-icon md-icon" style="--md-icon:url('/icon/symbol/close_24dp_1F1F1F_FILL0_wght400_GRAD0_opsz24.svg')" aria-hidden="true"></span>
+                <span class="text">网协认证登陆</span>
+                <span class="circle"></span>
+                <span class="error-wash" aria-hidden="true"></span>
+                <span class="arr-1 oauth-icon md-icon" style="--md-icon:url('/icon/symbol/arrow_24dp_1F1F1F_FILL0_wght400_GRAD0_opsz24.svg')" aria-hidden="true"></span>
+              </button>
+              <button type="button" id="btnMcpOauthLogout" class="btn ghost" hidden>退出知识库登录</button>
+              <p class="hint" id="mcpOauthStatus" data-oauth-status></p>
+            </div>
             <div class="mcp-heat">
               <div class="mcp-heat-head">
                 <span>MCP 调用热度</span>
@@ -118,6 +129,50 @@
               <button type="button" id="btnSaveMcp" class="btn primary">保存配置</button>
             </div>
             <p class="hint" id="mcpStatus"></p>
+          </div>
+        </section>
+
+        <section id="page-qq" class="ga-page field-hidden" hidden>
+          <h1>QQ 机器人</h1>
+          <p class="ga-lead">使用 AppSecret 模式接入官方 QQ 机器人</p>
+          <div class="ga-card">
+            <label>
+              AppID
+              <input id="qqAppId" spellcheck="false" placeholder="机器人 AppID" />
+            </label>
+            <label>
+              AppSecret
+              <input id="qqAppSecret" type="password" placeholder="机器人 AppSecret" autocomplete="off" />
+            </label>
+            <div class="admin-oauth">
+              <p class="md-switch-title">知识库登录</p>
+              <p class="hint">QQ 没有登录弹窗，请在此用和企业网页相同的方式登录。登录后机器人用此账号检索知识库。</p>
+              <button type="button" id="btnQqOauth" class="animated-button">
+                <span class="arr-2 oauth-icon md-icon" style="--md-icon:url('/icon/symbol/arrow_24dp_1F1F1F_FILL0_wght400_GRAD0_opsz24.svg')" aria-hidden="true"></span>
+                <span class="oauth-x oauth-icon md-icon" style="--md-icon:url('/icon/symbol/close_24dp_1F1F1F_FILL0_wght400_GRAD0_opsz24.svg')" aria-hidden="true"></span>
+                <span class="text">网协认证登陆</span>
+                <span class="circle"></span>
+                <span class="error-wash" aria-hidden="true"></span>
+                <span class="arr-1 oauth-icon md-icon" style="--md-icon:url('/icon/symbol/arrow_24dp_1F1F1F_FILL0_wght400_GRAD0_opsz24.svg')" aria-hidden="true"></span>
+              </button>
+              <button type="button" id="btnQqOauthLogout" class="btn ghost" hidden>退出知识库登录</button>
+              <p class="hint" id="qqOauthStatus" data-oauth-status></p>
+            </div>
+            <div class="md-switch-row">
+              <div>
+                <p class="md-switch-title">启用 QQ 机器人</p>
+                <p class="hint">开启后，用户私聊或在群里 @ 机器人，等同于网页里新建并继续会话。发送「新会话」可再开一轮。</p>
+              </div>
+              <label class="md-switch">
+                <input id="qqEnabled" type="checkbox" />
+                <span class="md-switch-track" aria-hidden="true"></span>
+              </label>
+            </div>
+            <p class="hint">网页用户各自登录；QQ 机器人使用上面这次管理端登录。</p>
+            <div class="row admin-config-actions">
+              <button type="button" id="btnSaveQq" class="btn primary">保存配置</button>
+            </div>
+            <p class="hint" id="qqStatus"></p>
           </div>
         </section>
 
@@ -174,6 +229,6 @@
       </form>
     </div>
     <script src="/static/markdown.js?v=20260902x"></script>
-    <script src="/static/admin.js?v=20260903d"></script>
+    <script src="/static/admin.js?v=20260918a"></script>
   </body>
 </html>

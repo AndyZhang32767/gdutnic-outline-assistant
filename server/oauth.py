@@ -1,16 +1,14 @@
 from __future__ import annotations
 
-import json
 import secrets
-from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode, urlparse
 
 import httpx
 
 from server.mcp_client import origin_from_mcp_url, normalize_mcp_url
+from server import db
 
-CLIENT_STORE = Path(__file__).resolve().parent.parent / "data" / "oauth_client.json"
 SCOPES = "read"
 
 
@@ -118,11 +116,13 @@ async def _auth_server_metadata(origin: str) -> dict[str, Any]:
 
 
 async def _get_or_register_client(origin: str, meta: dict[str, Any], redirect_uri: str) -> dict[str, Any]:
-    CLIENT_STORE.parent.mkdir(parents=True, exist_ok=True)
-    stored = _load_store()
-    key = f"{origin}|{redirect_uri}"
-    if key in stored:
-        return stored[key]
+    with db.read() as conn:
+        row = conn.execute(
+            "SELECT client_id, client_secret FROM oauth_clients WHERE origin = ? AND redirect_uri = ?",
+            (origin, redirect_uri),
+        ).fetchone()
+        if row:
+            return {"client_id": row["client_id"], "client_secret": row["client_secret"] or ""}
     register_url = meta.get("registration_endpoint") or f"{origin}/oauth/register"
     payload = {
         "client_name": "GDUTNIC Outline 查询助手",
@@ -136,21 +136,22 @@ async def _get_or_register_client(origin: str, meta: dict[str, Any], redirect_ur
     if response.status_code >= 400:
         raise RuntimeError(f"OAuth 客户端注册失败: {response.text[:500]}")
     created = response.json()
-    stored[key] = {
+    rec = {
         "client_id": created["client_id"],
         "client_secret": created.get("client_secret") or "",
     }
-    CLIENT_STORE.write_text(json.dumps(stored, indent=2), encoding="utf-8")
-    return stored[key]
-
-
-def _load_store() -> dict[str, Any]:
-    if not CLIENT_STORE.exists():
-        return {}
-    try:
-        return json.loads(CLIENT_STORE.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return {}
+    with db.write() as conn:
+        conn.execute(
+            """
+            INSERT INTO oauth_clients(origin, redirect_uri, client_id, client_secret)
+            VALUES(?, ?, ?, ?)
+            ON CONFLICT(origin, redirect_uri) DO UPDATE SET
+              client_id = excluded.client_id,
+              client_secret = excluded.client_secret
+            """,
+            (origin, redirect_uri, rec["client_id"], rec["client_secret"]),
+        )
+    return rec
 
 
 def _s256(verifier: str) -> str:

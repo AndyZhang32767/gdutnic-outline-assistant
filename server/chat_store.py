@@ -1,14 +1,10 @@
 from __future__ import annotations
 
 import json
-import threading
-from pathlib import Path
 from typing import Any
 
-ROOT = Path(__file__).resolve().parent.parent
-DATA = ROOT / "data"
-STORE_PATH = DATA / "chats.json"
-_LOCK = threading.Lock()
+from server import db
+
 MAX_SESSIONS = 80
 MAX_MESSAGES = 240
 MAX_CONTENT = 20000
@@ -59,30 +55,6 @@ def _trim_content(content: Any) -> Any:
     return str(content or "")[:MAX_CONTENT]
 
 
-def _empty() -> dict[str, Any]:
-    return {"max_mb": 32, "visitors": {}}
-
-
-def _load() -> dict[str, Any]:
-    DATA.mkdir(parents=True, exist_ok=True)
-    if not STORE_PATH.exists():
-        return _empty()
-    try:
-        data = json.loads(STORE_PATH.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return _empty()
-    if not isinstance(data.get("visitors"), dict):
-        data["visitors"] = {}
-    if "max_mb" not in data:
-        data["max_mb"] = 32
-    return data
-
-
-def _save(data: dict[str, Any]) -> None:
-    DATA.mkdir(parents=True, exist_ok=True)
-    STORE_PATH.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-
-
 def _trim_session(raw: dict[str, Any]) -> dict[str, Any] | None:
     sid = str(raw.get("id") or "").strip()
     if not sid:
@@ -113,53 +85,76 @@ def _trim_session(raw: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
-def _max_mb(data: dict[str, Any]) -> int:
+def _max_mb(conn) -> int:
     try:
-        value = int(data.get("max_mb") or 32)
+        value = int(db.get_setting(conn, "chat_max_mb", 32) or 32)
     except (TypeError, ValueError):
         value = 32
     return max(1, min(value, 4096))
 
 
-def _usage_bytes(data: dict[str, Any]) -> int:
-    return len(json.dumps(data, ensure_ascii=False).encode("utf-8"))
+def _usage_bytes(conn) -> int:
+    row = conn.execute(
+        """
+        SELECT
+          COALESCE((SELECT SUM(LENGTH(content)) FROM messages), 0)
+          + COALESCE((SELECT SUM(LENGTH(title) + LENGTH(id) + LENGTH(visitor_id)) FROM chats), 0)
+          AS n
+        """
+    ).fetchone()
+    return int(row["n"] if row else 0)
 
 
-def _evict_oldest(data: dict[str, Any], max_mb: int) -> None:
+def _evict_oldest(conn, max_mb: int) -> None:
     limit = max_mb * 1024 * 1024
-    visitors = data.setdefault("visitors", {})
-    while _usage_bytes(data) > limit:
-        oldest: tuple[int, str, str] | None = None
-        for visitor_id, rec in visitors.items():
-            if not isinstance(rec, dict):
-                continue
-            for session in rec.get("sessions") or []:
-                if not isinstance(session, dict) or not session.get("id"):
-                    continue
-                key = (int(session.get("updatedAt") or 0), str(visitor_id), str(session.get("id")))
-                if oldest is None or key < oldest:
-                    oldest = key
-        if oldest is None:
+    while _usage_bytes(conn) > limit:
+        row = conn.execute(
+            "SELECT visitor_id, id FROM chats ORDER BY updated_at ASC, id ASC LIMIT 1"
+        ).fetchone()
+        if not row:
             break
-        _, visitor_id, chat_id = oldest
-        rec = visitors.get(visitor_id) or {}
-        remaining = [
-            session
-            for session in rec.get("sessions") or []
-            if isinstance(session, dict) and str(session.get("id")) != chat_id
-        ]
-        if remaining:
-            rec["sessions"] = remaining
-            visitors[visitor_id] = rec
-        else:
-            visitors.pop(visitor_id, None)
+        conn.execute(
+            "DELETE FROM chats WHERE visitor_id = ? AND id = ?",
+            (row["visitor_id"], row["id"]),
+        )
+        conn.execute(
+            """
+            DELETE FROM visitors
+            WHERE id = ?
+              AND NOT EXISTS (SELECT 1 FROM chats WHERE visitor_id = visitors.id)
+            """,
+            (row["visitor_id"],),
+        )
+
+
+def _session_from_row(conn, row) -> dict[str, Any]:
+    messages = []
+    for item in conn.execute(
+        """
+        SELECT role, content FROM messages
+        WHERE visitor_id = ? AND chat_id = ?
+        ORDER BY seq ASC
+        """,
+        (row["visitor_id"], row["id"]),
+    ):
+        try:
+            content = json.loads(item["content"])
+        except json.JSONDecodeError:
+            content = item["content"]
+        messages.append({"role": item["role"], "content": content})
+    return {
+        "id": row["id"],
+        "title": row["title"] or "新会话",
+        "userTheme": {"bg": row["theme_bg"] or "", "ink": row["theme_ink"] or ""},
+        "messages": messages,
+        "updatedAt": int(row["updated_at"] or 0),
+    }
 
 
 def stats() -> dict[str, Any]:
-    with _LOCK:
-        data = _load()
-        used = _usage_bytes(data)
-        max_mb = _max_mb(data)
+    with db.read() as conn:
+        used = _usage_bytes(conn)
+        max_mb = _max_mb(conn)
     return {
         "max_mb": max_mb,
         "used_bytes": used,
@@ -168,11 +163,10 @@ def stats() -> dict[str, Any]:
 
 
 def set_max_mb(max_mb: int) -> dict[str, Any]:
-    with _LOCK:
-        data = _load()
-        data["max_mb"] = max(1, min(int(max_mb), 4096))
-        _evict_oldest(data, data["max_mb"])
-        _save(data)
+    value = max(1, min(int(max_mb), 4096))
+    with db.write() as conn:
+        db.set_setting(conn, "chat_max_mb", value)
+        _evict_oldest(conn, value)
     return stats()
 
 
@@ -189,62 +183,111 @@ def save_visitor_chats(visitor_id: str, sessions: list[Any], current_id: str | N
             cleaned.append(row)
     cleaned.sort(key=lambda row: int(row.get("updatedAt") or 0), reverse=True)
     cleaned = cleaned[:MAX_SESSIONS]
-    with _LOCK:
-        data = _load()
-        data["visitors"][visitor_id] = {
-            "currentId": str(current_id or ""),
-            "sessions": cleaned,
-        }
-        _evict_oldest(data, _max_mb(data))
-        _save(data)
+    with db.write() as conn:
+        if not cleaned:
+            conn.execute("DELETE FROM visitors WHERE id = ?", (visitor_id,))
+            _evict_oldest(conn, _max_mb(conn))
+            return
+        conn.execute(
+            """
+            INSERT INTO visitors(id, current_id) VALUES(?, ?)
+            ON CONFLICT(id) DO UPDATE SET current_id = excluded.current_id
+            """,
+            (visitor_id, str(current_id or "")),
+        )
+        conn.execute("DELETE FROM chats WHERE visitor_id = ?", (visitor_id,))
+        for session in cleaned:
+            conn.execute(
+                """
+                INSERT INTO chats(visitor_id, id, title, updated_at, theme_bg, theme_ink)
+                VALUES(?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    visitor_id,
+                    session["id"],
+                    session["title"],
+                    int(session.get("updatedAt") or 0),
+                    session["userTheme"]["bg"],
+                    session["userTheme"]["ink"],
+                ),
+            )
+            for seq, message in enumerate(session["messages"]):
+                conn.execute(
+                    "INSERT INTO messages(visitor_id, chat_id, seq, role, content) VALUES(?, ?, ?, ?, ?)",
+                    (
+                        visitor_id,
+                        session["id"],
+                        seq,
+                        message["role"],
+                        json.dumps(message.get("content"), ensure_ascii=False),
+                    ),
+                )
+        _evict_oldest(conn, _max_mb(conn))
 
 
 def load_visitor_chats(visitor_id: str) -> dict[str, Any]:
     visitor_id = (visitor_id or "").strip()
-    with _LOCK:
-        data = _load()
-        rec = data["visitors"].get(visitor_id) or {}
-    sessions = rec.get("sessions") if isinstance(rec, dict) else []
-    if not isinstance(sessions, list):
-        sessions = []
+    with db.read() as conn:
+        rec = conn.execute("SELECT current_id FROM visitors WHERE id = ?", (visitor_id,)).fetchone()
+        rows = conn.execute(
+            """
+            SELECT visitor_id, id, title, updated_at, theme_bg, theme_ink
+            FROM chats
+            WHERE visitor_id = ?
+            ORDER BY updated_at DESC
+            """,
+            (visitor_id,),
+        ).fetchall()
+        sessions = [_session_from_row(conn, row) for row in rows]
     return {
-        "currentId": str(rec.get("currentId") or "") if isinstance(rec, dict) else "",
+        "currentId": str(rec["current_id"] or "") if rec else "",
         "sessions": sessions,
     }
 
 
 def list_all() -> list[dict[str, Any]]:
-    with _LOCK:
-        data = _load()
-    items: list[dict[str, Any]] = []
-    for visitor_id, rec in (data.get("visitors") or {}).items():
-        if not isinstance(rec, dict):
-            continue
-        for session in rec.get("sessions") or []:
-            if not isinstance(session, dict):
-                continue
-            messages = session.get("messages") or []
-            if not messages:
-                continue
+    with db.read() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+              c.visitor_id,
+              c.id,
+              c.title,
+              c.updated_at,
+              c.theme_bg,
+              c.theme_ink,
+              (SELECT COUNT(*) FROM messages m WHERE m.visitor_id = c.visitor_id AND m.chat_id = c.id) AS message_count,
+              (
+                SELECT m.content FROM messages m
+                WHERE m.visitor_id = c.visitor_id AND m.chat_id = c.id AND m.role = 'user'
+                ORDER BY m.seq ASC LIMIT 1
+              ) AS preview_json
+            FROM chats c
+            WHERE EXISTS (
+              SELECT 1 FROM messages m WHERE m.visitor_id = c.visitor_id AND m.chat_id = c.id
+            )
+            ORDER BY c.updated_at DESC
+            """
+        ).fetchall()
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            preview = ""
+            if row["preview_json"]:
+                try:
+                    preview = _plain_content(json.loads(row["preview_json"]))[:80]
+                except json.JSONDecodeError:
+                    preview = str(row["preview_json"])[:80]
             items.append(
                 {
-                    "visitor_id": visitor_id,
-                    "id": session.get("id"),
-                    "title": session.get("title") or "新会话",
-                    "updatedAt": int(session.get("updatedAt") or 0),
-                    "userTheme": session.get("userTheme") or {},
-                    "message_count": len(messages),
-                    "preview": next(
-                        (
-                            _plain_content(m.get("content"))[:80]
-                            for m in messages
-                            if isinstance(m, dict) and m.get("role") == "user"
-                        ),
-                        "",
-                    ),
+                    "visitor_id": row["visitor_id"],
+                    "id": row["id"],
+                    "title": row["title"] or "新会话",
+                    "updatedAt": int(row["updated_at"] or 0),
+                    "userTheme": {"bg": row["theme_bg"] or "", "ink": row["theme_ink"] or ""},
+                    "message_count": int(row["message_count"] or 0),
+                    "preview": preview,
                 }
             )
-    items.sort(key=lambda row: int(row.get("updatedAt") or 0), reverse=True)
     return items
 
 

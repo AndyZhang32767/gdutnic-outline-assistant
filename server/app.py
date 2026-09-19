@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 from starlette.middleware.sessions import SessionMiddleware
 
-from server import admin_store, chat_store
+from server import admin_store, chat_store, qq_bot
 from server.chat import stream_chat, summarize_title
 from server.mcp_client import McpError, OutlineMcpClient, normalize_mcp_url
 from server.oauth import exchange_code, start_oauth
@@ -47,7 +47,9 @@ async def lifespan(_app: FastAPI):
     if not admin_store.has_user():
         print("尚未注册管理员，首次打开站点会跳转到该地址并创建账号。")
     print("")
+    await qq_bot.sync()
     yield
+    await qq_bot.stop()
 
 
 class NoCacheStatic(StaticFiles):
@@ -165,9 +167,7 @@ async def defaults(request: Request) -> dict[str, Any]:
     session = request.session
     return {
         "mcp_url": admin_store.mcp_url() or session.get("mcp_url") or "",
-        "has_outline_token": bool(
-            session.get("outline_token") or session.get("mcp_api_key") or admin_store.mcp_api_key()
-        ),
+        "has_outline_token": bool(session.get("outline_token") or session.get("mcp_api_key")),
         "oauth_connected": bool(session.get("outline_token")),
     }
 
@@ -268,6 +268,12 @@ async def oauth_callback(request: Request, code: str | None = None, state: str |
         "mcp_url": flow["mcp_url"],
     }
     request.session.pop("oauth_flow", None)
+    if _admin_ok(request) and request.session.get("outline_token"):
+        admin_store.save_oauth(
+            request.session.get("outline_token") or "",
+            request.session.get("outline_refresh") or "",
+            request.session.get("oauth_meta") or {},
+        )
     return _oauth_popup_result(
         "ok",
         extra={
@@ -406,7 +412,6 @@ def _token_from(request: Request, body: dict[str, Any]) -> str:
     return (
         request.session.get("mcp_api_key")
         or request.session.get("outline_token")
-        or admin_store.mcp_api_key()
         or ""
     ).strip()
 
@@ -606,6 +611,48 @@ async def admin_mcp_save(request: Request) -> dict[str, Any]:
     _require_admin(request)
     body = await request.json()
     return admin_store.save_mcp(body)
+
+
+@app.post("/api/admin/oauth")
+async def admin_oauth_persist(request: Request) -> dict[str, Any]:
+    _require_admin(request)
+    token = str(request.session.get("outline_token") or "").strip()
+    refresh = str(request.session.get("outline_refresh") or "").strip()
+    meta = request.session.get("oauth_meta") if isinstance(request.session.get("oauth_meta"), dict) else {}
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if isinstance(body, dict):
+        token = str(body.get("access_token") or token).strip()
+        refresh = str(body.get("refresh_token") or refresh).strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="尚未完成知识库登录")
+    if token:
+        request.session["outline_token"] = token
+    if refresh:
+        request.session["outline_refresh"] = refresh
+    return admin_store.save_oauth(token, refresh, meta)
+
+
+@app.post("/api/admin/oauth/logout")
+async def admin_oauth_logout(request: Request) -> dict[str, Any]:
+    _require_admin(request)
+    return admin_store.clear_oauth()
+
+
+@app.get("/api/admin/qq")
+async def admin_qq_get(request: Request) -> dict[str, Any]:
+    _require_admin(request)
+    return qq_bot.public_status()
+
+
+@app.post("/api/admin/qq")
+async def admin_qq_save(request: Request) -> dict[str, Any]:
+    _require_admin(request)
+    body = await request.json()
+    admin_store.save_qq(body)
+    return await qq_bot.sync()
 
 
 @app.get("/api/chats")

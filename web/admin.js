@@ -108,9 +108,19 @@ const els = {
   adminList: document.getElementById("adminList"),
   adminDialogTitle: document.getElementById("adminDialogTitle"),
   mcpUrl: document.getElementById("mcpUrl"),
-  mcpKey: document.getElementById("mcpKey"),
   mcpStatus: document.getElementById("mcpStatus"),
   btnSaveMcp: document.getElementById("btnSaveMcp"),
+  btnMcpOauth: document.getElementById("btnMcpOauth"),
+  btnMcpOauthLogout: document.getElementById("btnMcpOauthLogout"),
+  mcpOauthStatus: document.getElementById("mcpOauthStatus"),
+  qqAppId: document.getElementById("qqAppId"),
+  qqAppSecret: document.getElementById("qqAppSecret"),
+  qqEnabled: document.getElementById("qqEnabled"),
+  qqStatus: document.getElementById("qqStatus"),
+  btnSaveQq: document.getElementById("btnSaveQq"),
+  btnQqOauth: document.getElementById("btnQqOauth"),
+  btnQqOauthLogout: document.getElementById("btnQqOauthLogout"),
+  qqOauthStatus: document.getElementById("qqOauthStatus"),
   mcpHeat: document.getElementById("mcpHeat"),
   mcpHeatValue: document.getElementById("mcpHeatValue"),
   mcpHeatHint: document.getElementById("mcpHeatHint"),
@@ -631,8 +641,8 @@ async function loadMcp() {
   const data = await res.json();
   if (!res.ok) throw new Error(errorText(data));
   els.mcpUrl.value = data.mcp_url || "";
-  els.mcpKey.value = data.mcp_api_key || "";
   setMcpHeat(data.mcp_heat);
+  applyOauthStatus(data);
 }
 
 async function saveMcp() {
@@ -642,7 +652,6 @@ async function saveMcp() {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       mcp_url: els.mcpUrl.value.trim(),
-      mcp_api_key: els.mcpKey.value,
       mcp_heat: heat,
     }),
   });
@@ -650,6 +659,178 @@ async function saveMcp() {
   if (!res.ok) throw new Error(errorText(data));
   await loadMcp();
   els.mcpStatus.textContent = "已保存";
+}
+
+async function loadQq() {
+  const res = await fetch("/api/admin/qq");
+  const data = await res.json();
+  if (!res.ok) throw new Error(errorText(data));
+  applyQqForm(data);
+}
+
+function applyOauthStatus(data) {
+  const connected = Boolean(data?.oauth_connected);
+  const text = connected ? "知识库已登录" : "未登录";
+  document.querySelectorAll("[data-oauth-status]").forEach((el) => {
+    el.textContent = text;
+  });
+  [els.btnMcpOauthLogout, els.btnQqOauthLogout].forEach((btn) => {
+    if (btn) btn.hidden = !connected;
+  });
+}
+
+function oauthButtons() {
+  return [els.btnMcpOauth, els.btnQqOauth].filter(Boolean);
+}
+
+const OAUTH_LABEL = "网协认证登陆";
+let oauthPending = false;
+let oauthResetTimer = 0;
+
+function setOauthLabel(text) {
+  oauthButtons().forEach((btn) => {
+    const span = btn.querySelector(".text");
+    if (!span || span.textContent === text) return;
+    span.style.opacity = "0";
+    setTimeout(() => {
+      span.textContent = text;
+      span.style.opacity = "1";
+    }, 250);
+  });
+}
+
+function setOauthActive(on) {
+  oauthPending = on;
+  oauthButtons().forEach((btn) => {
+    if (!on && btn.classList.contains("is-error")) {
+      btn.classList.add("is-leaving-error");
+      btn.classList.remove("is-error", "is-active");
+      setTimeout(() => btn.classList.remove("is-leaving-error"), 800);
+    } else {
+      btn.classList.toggle("is-active", on);
+      btn.classList.remove("is-error", "is-leaving-error");
+    }
+    btn.setAttribute("aria-busy", on ? "true" : "false");
+  });
+  setOauthLabel(on ? "登陆中" : OAUTH_LABEL);
+}
+
+function failOauthButton(message) {
+  oauthPending = true;
+  oauthButtons().forEach((btn) => {
+    btn.classList.remove("is-leaving-error");
+    btn.classList.add("is-active", "is-error");
+    btn.setAttribute("aria-busy", "false");
+  });
+  setOauthLabel("登陆失败");
+  document.querySelectorAll("[data-oauth-status]").forEach((el) => {
+    el.textContent = message || "登录未完成";
+  });
+  clearTimeout(oauthResetTimer);
+  oauthResetTimer = setTimeout(() => setOauthActive(false), 2500);
+}
+
+async function persistAdminOauth(extra = {}) {
+  const res = await fetch("/api/admin/oauth", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(extra),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(errorText(data));
+  applyOauthStatus(data);
+  return data;
+}
+
+async function finishAdminOauth(extra = {}) {
+  await persistAdminOauth(extra);
+  setOauthActive(false);
+  document.querySelectorAll("[data-oauth-status]").forEach((el) => {
+    el.textContent = "知识库已登录";
+  });
+}
+
+async function startAdminOauth() {
+  if (oauthPending) return;
+  clearTimeout(oauthResetTimer);
+  setOauthActive(true);
+  const url = (els.mcpUrl?.value || "").trim();
+  if (url) {
+    try {
+      const res = await fetch("/api/admin/mcp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mcp_url: url }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(errorText(data));
+    } catch (err) {
+      failOauthButton(err.message || "请先保存网协 MCP 地址");
+      return;
+    }
+  }
+  const popup = window.open(
+    "/api/mcp/oauth/start",
+    "outline-oauth",
+    "width=520,height=740,menubar=no,toolbar=no,status=no"
+  );
+  if (!popup) {
+    failOauthButton("浏览器拦截了登录弹窗，请允许本站弹出窗口后重试");
+    return;
+  }
+  document.querySelectorAll("[data-oauth-status]").forEach((el) => {
+    el.textContent = "请在弹出窗口中用企业账号密码登录…";
+  });
+  popup.focus();
+  const timer = setInterval(() => {
+    if (!popup.closed) return;
+    clearInterval(timer);
+    persistAdminOauth()
+      .then(() => setOauthActive(false))
+      .catch(() => {
+        if (!oauthPending) return;
+        failOauthButton("登录未完成，请再试一次");
+      });
+  }, 600);
+}
+
+async function logoutAdminOauth() {
+  const res = await fetch("/api/admin/oauth/logout", { method: "POST" });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(errorText(data));
+  applyOauthStatus({ oauth_connected: false });
+}
+
+function applyQqForm(data) {
+  if (els.qqAppId) els.qqAppId.value = data.app_id || "";
+  if (els.qqAppSecret) els.qqAppSecret.value = data.app_secret || "";
+  if (els.qqEnabled) els.qqEnabled.checked = Boolean(data.enabled);
+  applyOauthStatus(data);
+  if (!els.qqStatus) return;
+  if (data.error) els.qqStatus.textContent = data.error;
+  else if (data.running) els.qqStatus.textContent = "机器人运行中";
+  else if (data.enabled) els.qqStatus.textContent = "已开启，正在连接…";
+  else els.qqStatus.textContent = "";
+}
+
+function qqPayload() {
+  return {
+    app_id: (els.qqAppId?.value || "").trim(),
+    app_secret: els.qqAppSecret?.value || "",
+    enabled: Boolean(els.qqEnabled?.checked),
+  };
+}
+
+async function saveQq() {
+  const res = await fetch("/api/admin/qq", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(qqPayload()),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(errorText(data));
+  applyQqForm(data);
+  if (!data.error) els.qqStatus.textContent = data.running ? "已保存，机器人运行中" : "已保存";
 }
 
 function mcpHeatHint(value) {
@@ -678,7 +859,7 @@ function setMcpHeat(value) {
 
 async function loadWorkspace(username, { fromAuth = true } = {}) {
   const fade = showWorkspace(username, { fromAuth });
-  await Promise.all([loadModel(), loadMcp(), loadAdmins(), fade]);
+  await Promise.all([loadModel(), loadMcp(), loadQq(), loadAdmins(), fade]);
 }
 
 function attachRipple() {
@@ -767,6 +948,59 @@ async function boot() {
       els.mcpStatus.textContent = err.message;
     });
   });
+  oauthButtons().forEach((btn) => {
+    btn.addEventListener("click", (event) => {
+      event.preventDefault();
+      startAdminOauth();
+    });
+  });
+  [els.btnMcpOauthLogout, els.btnQqOauthLogout].forEach((btn) => {
+    if (!btn) return;
+    btn.addEventListener("click", () => {
+      logoutAdminOauth().catch((err) => {
+        document.querySelectorAll("[data-oauth-status]").forEach((el) => {
+          el.textContent = err.message;
+        });
+      });
+    });
+  });
+  window.addEventListener("message", (event) => {
+    if (event.origin !== location.origin) return;
+    const data = event.data || {};
+    if (data.type !== "outline-oauth") return;
+    if (data.status === "ok") {
+      finishAdminOauth({
+        access_token: data.access_token || "",
+        refresh_token: data.refresh_token || "",
+      }).catch((err) => failOauthButton(err.message || "登录凭证保存失败"));
+      return;
+    }
+    const map = {
+      missing_url: "请先填写并保存网协 MCP 地址",
+      start: "无法打开企业登录：" + (data.message || ""),
+      missing: "登录未完成",
+      state: "登录校验失败，请再试一次",
+      token: "登录换票失败：" + (data.message || ""),
+    };
+    failOauthButton(map[data.status] || "登录未完成");
+  });
+  if (els.btnSaveQq) {
+    els.btnSaveQq.addEventListener("click", () => {
+      els.qqStatus.textContent = "正在保存…";
+      saveQq().catch((err) => {
+        els.qqStatus.textContent = err.message;
+      });
+    });
+  }
+  if (els.qqEnabled) {
+    els.qqEnabled.addEventListener("change", () => {
+      els.qqStatus.textContent = els.qqEnabled.checked ? "正在开启…" : "正在关闭…";
+      saveQq().catch((err) => {
+        els.qqEnabled.checked = !els.qqEnabled.checked;
+        els.qqStatus.textContent = err.message;
+      });
+    });
+  }
   if (els.mcpHeat) {
     els.mcpHeat.addEventListener("input", () => setMcpHeat(els.mcpHeat.value));
   }
