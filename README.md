@@ -28,11 +28,20 @@ chmod +x start.sh
 ./start.sh
 ```
 
-也可手动：
+启动脚本会：
+
+1. 在项目目录创建并使用 `.venv` 虚拟环境（避免 Linux 上系统 Python 禁止直接 `pip install`）
+2. 先用默认 PyPI 安装依赖；失败时自动依次尝试清华 / 阿里云 / 中科大 / 百度镜像
+
+也可手动（建议同样使用虚拟环境）：
 
 ```bash
-python3 -m pip install -r requirements.txt
-python3 -m uvicorn server.app:app --host 0.0.0.0 --port 8787
+python3 -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+# 若默认源失败：
+# pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn
+python -m uvicorn server.app:app --host 0.0.0.0 --port 8787
 ```
 
 默认监听 `0.0.0.0:8787`。只想本机访问时把 `--host` 改成 `127.0.0.1`。局域网若被拦截，请在防火墙放行 8787。
