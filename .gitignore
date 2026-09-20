@@ -7,6 +7,11 @@ venv/
 data/
 .oauth_client.json
 *.log
+*.log.*
+botpy.log*
+*.bak
+*.sqlite
+*.sqlite-*
 .DS_Store
 Thumbs.db
 .idea/
