@@ -13,8 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 from starlette.middleware.sessions import SessionMiddleware
 
-from server import admin_store, chat_store, qq_bot
-from server.chat import stream_chat, summarize_title
+from server import admin_store, chat_store, duty_settings, field_duty, overview, permissions, schedule_store, weekly_store, member_store, security
 from server.mcp_client import McpError, OutlineMcpClient, normalize_mcp_url
 from server.oauth import exchange_code, start_oauth
 
@@ -39,36 +38,79 @@ def _session_secret() -> str:
 
 
 @asynccontextmanager
+def _qq_bot():
+    """Load the optional QQ bridge lazily: it pulls in asyncio helpers we otherwise skip."""
+    from server import qq_bot
+    return qq_bot
+
+
+def _chat_helpers():
+    from server import chat
+    return chat
+
+
 async def lifespan(_app: FastAPI):
     admin_store.load()
+    permissions.ensure_defaults()
+    result = member_store.provision()
+    print(f"[members] 新建普通用户账号 {result['created']} 个，保留现有账号 {result['existing']} 个")
     slug = admin_store.path()
     print("")
-    print(f"管理员界面: http://127.0.0.1:8787/{slug}")
+    print(f"管理员界面: http://127.0.0.1:50025/{slug}")
     if not admin_store.has_user():
         print("尚未注册管理员，首次打开站点会跳转到该地址并创建账号。")
     print("")
-    await qq_bot.sync()
+    if admin_store.qq_config().get('enabled'):
+        await _qq_bot().sync()
     yield
-    await qq_bot.stop()
+    if admin_store.qq_config().get('enabled'):
+        await _qq_bot().stop()
 
 
 class NoCacheStatic(StaticFiles):
     async def get_response(self, path: str, scope):
         response = await super().get_response(path, scope)
-        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+        # Old scripts must never survive a deploy; browsers revalidate every static file.
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
         return response
 
 
-app = FastAPI(title="GDUTNIC Outline 查询助手", lifespan=lifespan)
+app = FastAPI(title="网络服务协会 排班签到", lifespan=lifespan)
 app.add_middleware(
     SessionMiddleware,
     secret_key=_session_secret(),
     session_cookie="gdutnic_wiki",
     same_site="lax",
-    https_only=False,
-    max_age=60 * 60 * 24 * 30,
+    # HTTPS is required whenever the app is served over TLS; plain HTTP on a LAN stays usable.
+    https_only=os.environ.get("SESSION_HTTPS_ONLY", "").lower() in {"1", "true", "yes"},
+    max_age=security.SESSION_TTL,
 )
+
+ADMIN_LIMITER = security.AttemptLimiter()
+MEMBER_LIMITER = security.AttemptLimiter()
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+
+    # Credentials must never leak through a referrer or be framed for clickjacking.
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
+    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    response.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline';"
+        " script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none';"
+        " form-action 'self'",
+    )
+    if os.environ.get("SESSION_HTTPS_ONLY", "").lower() in {"1", "true", "yes"}:
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
+    return response
 
 VISITOR_COOKIE = "gdutnic_visitor"
 ADMIN_COOKIE = "gdutnic_admin"
@@ -83,9 +125,10 @@ def _set_admin_cookie(response: JSONResponse, username: str) -> None:
     response.set_cookie(
         ADMIN_COOKIE,
         token,
-        max_age=60 * 60 * 24 * 30,
+        max_age=security.SESSION_TTL,
         httponly=True,
         samesite="lax",
+        secure=os.environ.get("SESSION_HTTPS_ONLY", "").lower() in {"1", "true", "yes"},
         path="/",
     )
 
@@ -99,7 +142,7 @@ def _admin_from_cookie(request: Request) -> str:
     if not raw:
         return ""
     try:
-        data = _admin_signer().loads(raw, max_age=60 * 60 * 24 * 30)
+        data = _admin_signer().loads(raw, max_age=security.SESSION_TTL)
     except (BadSignature, Exception):
         return ""
     name = str(data.get("u") or "").strip()
@@ -148,8 +191,9 @@ async def index():
     return FileResponse(
         WEB / "index.html",
         headers={
-            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",
+            "Expires": "0",
         },
     )
 
@@ -341,7 +385,7 @@ async def chat(request: Request) -> StreamingResponse:
             async with OutlineMcpClient(mcp_url, token) as mcp:
                 tools = await mcp.list_tools() if admin_store.mcp_heat() > 0 else []
                 yield _sse({"type": "mcp_ready", "tools": [t.get("name") for t in tools]})
-                async for event in stream_chat(
+                async for event in _chat_helpers().stream_chat(
                     openai_base=openai_base,
                     openai_key=openai_key,
                     model=model,
@@ -392,7 +436,7 @@ async def chat_title(request: Request) -> dict[str, str]:
     if not messages:
         raise HTTPException(status_code=400, detail="消息不能为空")
     try:
-        title = await summarize_title(
+        title = await _chat_helpers().summarize_title(
             openai_base=openai_base,
             openai_key=openai_key,
             model=model,
@@ -465,15 +509,47 @@ def _admin_gate(request: Request) -> bool:
     return request.session.get("admin_gate") == admin_store.path()
 
 
+def _session_account(request: Request) -> str:
+    """The account behind this admin session, from the signed cookie or the session."""
+    name = _admin_from_cookie(request)
+    if name:
+        return name if permissions.is_admin(name) else ""
+    if not request.session.get("admin_ok"):
+        return ""
+    name = str(request.session.get("admin_username") or "").strip()
+    return name if name and permissions.is_admin(name) else ""
+
+
 def _admin_ok(request: Request) -> bool:
-    if _admin_from_cookie(request):
-        return True
-    return bool(request.session.get("admin_ok")) and admin_store.has_user()
+    return bool(_session_account(request))
 
 
 def _require_admin(request: Request) -> None:
     if not _admin_ok(request):
         raise HTTPException(status_code=401, detail="请先登录管理员")
+
+
+def _require_permission(request: Request, permission: str) -> str:
+    """Administrator endpoints are gated per permission group."""
+    name = _session_account(request)
+    if not name:
+        raise HTTPException(status_code=401, detail="请先登录管理员")
+    if not permissions.has(name, permission):
+        raise HTTPException(status_code=403, detail="当前账号没有此权限")
+    return name
+
+
+def _may_manage(target: str, actor: str) -> bool:
+    """Without the grant permission, an account cannot touch a privileged account.
+
+    A plain duty account (only the user permission) is fair game; anyone holding any
+    administrative permission is protected from accounts that cannot grant permissions.
+    """
+    if target == actor:
+        return True
+    if permissions.has(actor, "accounts_protected"):
+        return True
+    return not permissions.is_admin(target)
 
 
 def _admin_username(request: Request) -> str:
@@ -494,11 +570,14 @@ def _admin_username(request: Request) -> str:
 
 @app.get("/api/admin/status")
 async def admin_status(request: Request) -> dict[str, Any]:
+    name = _session_account(request)
     return {
         "setup": admin_store.has_user(),
-        "logged_in": _admin_ok(request),
+        "logged_in": bool(name),
         "gate": _admin_gate(request),
-        "username": _admin_username(request),
+        "username": name or _admin_username(request) if name else "",
+        "permissions": sorted(permissions.permissions_of(name)) if name else [],
+        "can_grant": bool(name and permissions.has(name, "accounts_protected")),
     }
 
 
@@ -509,8 +588,13 @@ async def admin_register(request: Request) -> dict[str, Any]:
     if admin_store.has_user():
         raise HTTPException(status_code=409, detail="管理员已注册，请直接登录")
     body = await request.json()
+    username = str(body.get("username") or "").strip()
+    password = str(body.get("password") or "")
     try:
-        admin_store.register(str(body.get("username") or ""), str(body.get("password") or ""))
+        # The first administrator is an ordinary account granted every permission.
+        member_store.create(username, password)
+        permissions.set_permissions(username, permissions.ADMIN_DEFAULTS)
+        admin_store.remember_setup(username)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     request.session["admin_ok"] = True
@@ -524,10 +608,21 @@ async def admin_register(request: Request) -> dict[str, Any]:
 async def admin_login(request: Request) -> JSONResponse:
     if not _admin_gate(request):
         raise HTTPException(status_code=403, detail="请从控制台提示的管理员网址进入")
+    key = "admin:" + security.client_key(request)
+    if ADMIN_LIMITER.blocked(key):
+        raise HTTPException(status_code=429, detail="登录尝试过于频繁，请稍后再试")
     body = await request.json()
     username = str(body.get("username") or "").strip()
-    if not admin_store.verify_login(username, str(body.get("password") or "")):
+    password = str(body.get("password") or "")
+    version = member_store.authenticate(username, password)
+    if not version:
+        ADMIN_LIMITER.fail(key)
         raise HTTPException(status_code=401, detail="用户名或密码不正确")
+    # Administrator pages are open to any account with at least one admin permission.
+    if not permissions.is_admin(username):
+        ADMIN_LIMITER.fail(key)
+        raise HTTPException(status_code=403, detail="该账号没有管理员权限")
+    ADMIN_LIMITER.reset(key)
     request.session["admin_ok"] = True
     request.session["admin_username"] = username
     response = JSONResponse({"ok": True, "username": username})
@@ -644,7 +739,7 @@ async def admin_oauth_logout(request: Request) -> dict[str, Any]:
 @app.get("/api/admin/qq")
 async def admin_qq_get(request: Request) -> dict[str, Any]:
     _require_admin(request)
-    return qq_bot.public_status()
+    return _qq_bot().public_status()
 
 
 @app.post("/api/admin/qq")
@@ -652,7 +747,7 @@ async def admin_qq_save(request: Request) -> dict[str, Any]:
     _require_admin(request)
     body = await request.json()
     admin_store.save_qq(body)
-    return await qq_bot.sync()
+    return await _qq_bot().sync()
 
 
 @app.get("/api/chats")
@@ -698,6 +793,356 @@ async def admin_chats_detail(request: Request, visitor_id: str, chat_id: str) ->
     return rec
 
 
+def _schedule_error(exc):
+    if isinstance(exc, LookupError):
+        return HTTPException(status_code=404, detail=str(exc))
+    return HTTPException(status_code=400, detail=str(exc) or "排班数据格式不正确")
+
+
+@app.get("/api/admin/overview")
+async def admin_overview(request: Request, month: str = ""):
+    _require_permission(request, "schedule")
+    try:
+        return overview.overview(month or None)
+    except ValueError as exc:
+        raise _schedule_error(exc) from exc
+
+
+@app.get("/api/schedules")
+async def schedules_get(request: Request, day: str):
+    name = None if _admin_ok(request) else _require_member(request)
+    try:
+        return {
+            "items": schedule_store.list_day(day, name),
+            "rules": duty_settings.load() if name is not None else None,
+        }
+    except ValueError as exc:
+        raise _schedule_error(exc) from exc
+
+
+@app.get("/api/special-schedules")
+async def special_schedules_get(request: Request, from_day: str = ""):
+    name = None if _admin_ok(request) else _require_member(request)
+    try:
+        return {"items": schedule_store.list_special(from_day or None, name)}
+    except ValueError as exc:
+        raise _schedule_error(exc) from exc
+
+
+@app.get("/api/admin/rules")
+async def admin_rules_get(request: Request):
+    _require_permission(request, "schedule")
+    return duty_settings.load()
+
+
+@app.put("/api/admin/rules")
+async def admin_rules_save(request: Request):
+    _require_permission(request, "schedule")
+    try:
+        return duty_settings.save(await request.json())
+    except (ValueError, TypeError) as exc:
+        raise _schedule_error(exc) from exc
+
+
+@app.post("/api/schedules/{shift_id}/check-in")
+async def schedule_check_in(shift_id: int, request: Request):
+    name = _require_member(request)
+    try:
+        stamp, chained = schedule_store.check_in_with_chain(shift_id, name)
+        return {"checked_at": stamp, "chained": chained}
+    except (ValueError, LookupError) as exc:
+        raise _schedule_error(exc) from exc
+
+
+@app.delete("/api/admin/schedules")
+async def schedules_clear(request: Request):
+    _require_permission(request, "schedule")
+    return schedule_store.clear_all()
+
+
+@app.post("/api/admin/schedules")
+async def schedule_create(request: Request):
+    _require_permission(request, "schedule")
+    try:
+        return {"id": schedule_store.save(await request.json())}
+    except (ValueError, TypeError, LookupError) as exc:
+        raise _schedule_error(exc) from exc
+
+
+@app.post("/api/admin/special-schedules")
+async def special_schedule_create(request: Request):
+    _require_permission(request, "schedule")
+    body = await request.json()
+    try:
+        return {"id": schedule_store.save({**body, "special": True})}
+    except (ValueError, TypeError, LookupError) as exc:
+        raise _schedule_error(exc) from exc
+
+
+@app.put("/api/admin/special-schedules/{shift_id}")
+async def special_schedule_update(shift_id: int, request: Request):
+    _require_permission(request, "schedule")
+    body = await request.json()
+    try:
+        return {"id": schedule_store.save({**body, "special": True}, shift_id)}
+    except (ValueError, TypeError, LookupError) as exc:
+        raise _schedule_error(exc) from exc
+
+
+@app.delete("/api/admin/special-schedules/{shift_id}")
+async def special_schedule_delete(shift_id: int, request: Request):
+    _require_permission(request, "schedule")
+    try:
+        schedule_store.delete(shift_id)
+        return {"ok": True}
+    except LookupError as exc:
+        raise _schedule_error(exc) from exc
+
+
+@app.put("/api/admin/schedules/{shift_id}")
+async def schedule_update(shift_id: int, request: Request):
+    _require_permission(request, "schedule")
+    try:
+        return {"id": schedule_store.save(await request.json(), shift_id)}
+    except (ValueError, TypeError, LookupError) as exc:
+        raise _schedule_error(exc) from exc
+
+
+@app.delete("/api/admin/schedules/{shift_id}")
+async def schedule_delete(shift_id: int, request: Request):
+    _require_permission(request, "schedule")
+    try:
+        schedule_store.delete(shift_id)
+        return {"ok": True}
+    except LookupError as exc:
+        raise _schedule_error(exc) from exc
+
+
+@app.get("/api/admin/weekly-roster")
+async def weekly_get(request: Request):
+    _require_permission(request, "schedule")
+    return weekly_store.load()
+
+
+@app.put("/api/admin/weekly-roster")
+async def weekly_save(request: Request):
+    _require_permission(request, "schedule")
+    try:
+        roster = weekly_store.save(await request.json())
+        # Only after the reviewed roster is stored do we create missing duty accounts.
+        created = member_store.create_missing(
+            {name for slot in roster['slots'] for names in slot['days'] for name in names})
+        return {**roster, "members_created": created['created']}
+    except (ValueError, TypeError) as exc:
+        raise _schedule_error(exc) from exc
+
+
+@app.post("/api/admin/weekly-roster/publish")
+async def weekly_publish(request: Request):
+    _require_permission(request, "schedule")
+    try:
+        body = await request.json()
+        return weekly_store.publish_until(str(body.get("end_date") or ""))
+    except (ValueError, TypeError) as exc:
+        raise _schedule_error(exc) from exc
+
+
+def _require_member(request: Request) -> str:
+    name = str(request.session.get("member_username") or "")
+    if not name or not member_store.session_valid(name, request.session.get("member_version")):
+        raise HTTPException(status_code=401, detail="请先登录值班账号")
+    return name
+
+
+@app.get("/api/member/status")
+async def member_status(request: Request):
+    try:
+        return {"logged_in": True, "username": _require_member(request)}
+    except HTTPException:
+        return {"logged_in": False, "username": ""}
+
+
+@app.post("/api/member/login")
+async def member_login(request: Request):
+    key = "member:" + security.client_key(request)
+    if MEMBER_LIMITER.blocked(key):
+        raise HTTPException(status_code=429, detail="登录尝试过于频繁，请稍后再试")
+    body = await request.json()
+    name = str(body.get("username") or "").strip()
+    version = member_store.authenticate(name, str(body.get("password") or ""))
+    if not version:
+        MEMBER_LIMITER.fail(key)
+        raise HTTPException(status_code=401, detail="姓名或密码不正确，或账号已停用")
+    MEMBER_LIMITER.reset(key)
+    request.session["member_username"] = name
+    request.session["member_version"] = version
+    return {"ok": True, "username": name}
+
+
+@app.get("/api/member/field-duty")
+async def member_field_duty(request: Request):
+    name = _require_member(request)
+    return field_duty.member_status(name)
+
+
+@app.post("/api/member/field-duty")
+async def member_field_duty_register(request: Request):
+    name = _require_member(request)
+    return field_duty.register(name)
+
+
+@app.put("/api/admin/overview/attendance")
+async def admin_set_attendance(request: Request):
+    _require_permission(request, "schedule")
+    body = await request.json()
+    try:
+        shift_id = int(body.get("shift_id"))
+        name = str(body.get("name") or "").strip()
+        return overview.set_member_status(shift_id, name, str(body.get("status") or ""))
+    except (TypeError, ValueError) as exc:
+        raise _schedule_error(exc) from exc
+    except LookupError as exc:
+        raise _schedule_error(exc) from exc
+
+
+@app.put("/api/admin/field-duty")
+async def admin_set_field_duty(request: Request):
+    _require_permission(request, "field")
+    body = await request.json()
+    try:
+        return field_duty.set_participation(
+            str(body.get("username") or "").strip(), bool(body.get("registered")),
+            str(body.get("month") or "") or None)
+    except (TypeError, ValueError) as exc:
+        raise _schedule_error(exc) from exc
+
+
+@app.get("/api/admin/field-duty")
+async def admin_field_duty(request: Request, month: str = ""):
+    _require_permission(request, "field")
+    try:
+        return field_duty.overview(month or None)
+    except ValueError as exc:
+        raise _schedule_error(exc) from exc
+
+
+@app.post("/api/member/logout")
+async def member_logout(request: Request):
+    request.session.pop("member_username", None)
+    request.session.pop("member_version", None)
+    return {"ok": True}
+
+
+@app.post("/api/member/password")
+async def member_password(request: Request):
+    name = _require_member(request)
+    body = await request.json()
+    try:
+        member_store.change_password(name, str(body.get("old_password") or ""), str(body.get("new_password") or ""))
+    except ValueError as exc:
+        raise _schedule_error(exc) from exc
+    request.session["member_version"] = member_store.session_version(name)
+    return {"ok": True}
+
+
+@app.get("/api/admin/members")
+async def admin_members(request: Request):
+    actor = _require_permission(request, "accounts")
+    return {
+        "items": member_store.list_accounts(),
+        "permissions": [{"id": key, "label": label, "hint": hint}
+                        for key, (label, hint) in permissions.PERMISSIONS.items()],
+        "tree": permissions.TREE,
+        "groups": list(permissions.GROUP_IDS),
+        "me": actor,
+        "can_grant": permissions.has(actor, "accounts_protected"),
+    }
+
+
+@app.put("/api/admin/members/permissions")
+async def admin_member_permissions(request: Request):
+    actor = _require_permission(request, "accounts")
+    body = await request.json()
+    name = str(body.get("username") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="请指定账号")
+    if not permissions.has(actor, "accounts_protected"):
+        raise HTTPException(status_code=403, detail="当前账号没有更改权限的资格")
+    try:
+        perms = permissions.set_permissions(name, body.get("permissions") or [])
+    except LookupError as exc:
+        raise _schedule_error(exc) from exc
+    return {"ok": True, "username": name, "permissions": sorted(perms)}
+
+
+@app.put("/api/admin/members/password")
+async def admin_member_password(request: Request):
+    actor = _require_permission(request, "accounts")
+    body = await request.json()
+    name = str(body.get("username") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="请指定账号")
+    # Only the account itself or a holder of "更改权限" may set a password.
+    if name != actor and not permissions.has(actor, "accounts_protected"):
+        raise HTTPException(status_code=403, detail="仅账号本人或拥有“更改权限”者可以更改密码")
+    try:
+        member_store.set_password(name, str(body.get("password") or ""))
+    except (ValueError, LookupError) as exc:
+        raise _schedule_error(exc) from exc
+    return {"ok": True}
+
+
+@app.post("/api/admin/members/provision")
+async def admin_provision_members(request: Request):
+    _require_permission(request, "accounts")
+    return member_store.provision()
+
+
+@app.post("/api/admin/members")
+async def admin_add_member(request: Request):
+    _require_permission(request, "accounts_manage")
+    body = await request.json()
+    try:
+        return member_store.create(body.get("username"))
+    except ValueError as exc:
+        raise _schedule_error(exc) from exc
+
+
+@app.delete("/api/admin/members")
+async def admin_delete_member(request: Request, username: str = ""):
+    actor = _require_permission(request, "accounts_manage")
+    name = username.strip()
+    if not name:
+        try:
+            name = str((await request.json()).get("username") or "").strip()
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail="请指定要删除的账号") from exc
+    if not _may_manage(name, actor):
+        raise HTTPException(status_code=403, detail="该账号拥有权限，需具备更改权限的资格才能删除")
+    try:
+        member_store.delete(name)
+    except (ValueError, LookupError) as exc:
+        raise _schedule_error(exc) from exc
+    return {"ok": True}
+
+
+@app.patch("/api/admin/members")
+async def admin_update_member(request: Request):
+    actor = _require_permission(request, "accounts")
+    body = await request.json()
+    if "active" in body and not isinstance(body["active"], bool):
+        raise HTTPException(status_code=400, detail="账号状态格式错误")
+    target = str(body.get("username") or "").strip()
+    # Changing state or resetting a password of a privileged account needs the grant right.
+    if not _may_manage(target, actor):
+        raise HTTPException(status_code=403, detail="该账号拥有权限，需具备更改权限的资格才能操作")
+    try:
+        member_store.update(str(body.get("username") or ""), body.get("active"), body.get("reset_password") is True)
+    except ValueError as exc:
+        raise _schedule_error(exc) from exc
+    return {"ok": True}
+
+
 @app.get("/{slug}")
 async def admin_page(slug: str, request: Request):
     if len(slug) != 8 or slug != admin_store.path():
@@ -706,7 +1151,8 @@ async def admin_page(slug: str, request: Request):
     return FileResponse(
         WEB / "admin.html",
         headers={
-            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",
+            "Expires": "0",
         },
     )

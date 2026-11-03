@@ -16,3 +16,6 @@ botpy.log*
 Thumbs.db
 .idea/
 .vscode/
+
+!.env.example
+# Runtime data and imported rosters never belong in the repository.

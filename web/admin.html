@@ -1,234 +1,236 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#186078" />
-    <title>管理员 · Wiki 查询助手</title>
-    <link rel="icon" type="image/png" href="/icon/gdutnic.png" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260918a" />
-  </head>
-  <body class="admin-body">
-    <section id="authCard" class="admin-board">
-      <div class="admin-board-left">
-        <div class="admin-logo"><img src="/icon/gdutnic.png" alt="" /></div>
-        <h1 id="authTitle">注册管理员</h1>
-        <p id="authHint">请输入用户名和密码</p>
-      </div>
-      <form id="authForm" class="admin-board-right">
-        <label class="outlined-field">
-          <input id="adminUser" autocomplete="username" spellcheck="false" placeholder=" " />
-          <span>用户名</span>
-        </label>
-        <label class="outlined-field">
-          <input id="adminPass" type="password" autocomplete="new-password" placeholder=" " />
-          <span>密码</span>
-        </label>
-        <p class="admin-auth-status" id="authStatus"></p>
-        <button type="submit" class="btn primary" id="authSubmit">注册</button>
-      </form>
-    </section>
-
-    <div id="workspace" class="ga-app field-hidden" hidden>
-      <aside class="ga-nav">
-        <div class="ga-brand">
-          <div class="mark"><img src="/icon/gdutnic.png" alt="" /></div>
-          <div>
-            <h1>管理员</h1>
-            <p class="brand-sub">Wiki 查询助手</p>
-          </div>
-        </div>
-        <nav>
-          <button type="button" class="ga-nav-item active" data-page="model">模型接口</button>
-          <button type="button" class="ga-nav-item" data-page="mcp">知识库 MCP</button>
-          <button type="button" class="ga-nav-item" data-page="qq">QQ 机器人</button>
-          <button type="button" class="ga-nav-item" data-page="chats">对话记录</button>
-          <button type="button" class="ga-nav-item" data-page="account">管理员账号设置</button>
-        </nav>
-        <div class="panel-footer">
-          <button type="button" id="btnLogout" class="btn danger send" aria-label="登出" title="登出">
-            <span class="md-icon" style="--md-icon:url('/icon/symbol/logout_24dp_1F1F1F_FILL0_wght400_GRAD0_opsz24.svg')" aria-hidden="true"></span>
-          </button>
-        </div>
-      </aside>
-      <main class="ga-main">
-        <div class="ga-main-body">
-        <section id="page-model" class="ga-page">
-          <h1>模型接口</h1>
-          <p class="ga-lead">配置对话使用的 OpenAI 兼容接口</p>
-          <div class="ga-card">
-            <label>
-              厂商
-              <select id="provider"></select>
-            </label>
-            <label>
-              Base URL
-              <input id="openaiBase" spellcheck="false" placeholder="由厂商自动填入，可改" />
-            </label>
-            <label>
-              API Key
-              <input id="openaiKey" type="password" placeholder="选择厂商后填入对应 Key" />
-            </label>
-            <label id="modelSelectWrap">
-              模型
-              <select id="openaiModelSelect"></select>
-            </label>
-            <label id="customModelWrap" hidden>
-              模型名称
-              <input id="openaiModel" spellcheck="false" placeholder="请填写模型名称" />
-            </label>
-            <p class="hint" id="providerHint">选择厂商后会填入兼容 OpenAI 的接口地址，再填该厂商的 API Key。</p>
-            <div class="row admin-config-actions">
-              <button type="button" id="btnSaveModel" class="btn primary">保存配置</button>
-            </div>
-            <p class="hint" id="modelStatus"></p>
-          </div>
-          <div class="ga-card">
-            <label>
-              系统提示
-              <textarea id="systemPrompt" rows="8" spellcheck="false" placeholder="对话时发给模型的系统提示"></textarea>
-            </label>
-            <div class="row admin-config-actions">
-              <button type="button" id="btnSavePrompt" class="btn primary">保存提示</button>
-            </div>
-            <p class="hint" id="promptStatus"></p>
-          </div>
-        </section>
-
-        <section id="page-mcp" class="ga-page field-hidden" hidden>
-          <h1>知识库 MCP</h1>
-          <p class="ga-lead">对话页将使用这里填写的网协知识库地址</p>
-          <div class="ga-card">
-            <label>
-              网协 MCP 地址
-              <input id="mcpUrl" spellcheck="false" placeholder="https://知识库域名 或 https://知识库域名/mcp" />
-            </label>
-            <div class="admin-oauth">
-              <p class="md-switch-title">知识库登录</p>
-              <p class="hint">与网页相同的「网协认证登陆」。登录后 QQ 机器人用此账号检索知识库。</p>
-              <button type="button" id="btnMcpOauth" class="animated-button">
-                <span class="arr-2 oauth-icon md-icon" style="--md-icon:url('/icon/symbol/arrow_24dp_1F1F1F_FILL0_wght400_GRAD0_opsz24.svg')" aria-hidden="true"></span>
-                <span class="oauth-x oauth-icon md-icon" style="--md-icon:url('/icon/symbol/close_24dp_1F1F1F_FILL0_wght400_GRAD0_opsz24.svg')" aria-hidden="true"></span>
-                <span class="text">网协认证登陆</span>
-                <span class="circle"></span>
-                <span class="error-wash" aria-hidden="true"></span>
-                <span class="arr-1 oauth-icon md-icon" style="--md-icon:url('/icon/symbol/arrow_24dp_1F1F1F_FILL0_wght400_GRAD0_opsz24.svg')" aria-hidden="true"></span>
-              </button>
-              <button type="button" id="btnMcpOauthLogout" class="btn ghost" hidden>退出知识库登录</button>
-              <p class="hint" id="mcpOauthStatus" data-oauth-status></p>
-            </div>
-            <div class="mcp-heat">
-              <div class="mcp-heat-head">
-                <span>MCP 调用热度</span>
-                <span id="mcpHeatValue">50</span>
-              </div>
-              <input id="mcpHeat" type="range" min="0" max="100" step="1" value="50" />
-              <p class="hint" id="mcpHeatHint">检索到相关文档后即可作答</p>
-            </div>
-            <div class="row admin-config-actions">
-              <button type="button" id="btnSaveMcp" class="btn primary">保存配置</button>
-            </div>
-            <p class="hint" id="mcpStatus"></p>
-          </div>
-        </section>
-
-        <section id="page-qq" class="ga-page field-hidden" hidden>
-          <h1>QQ 机器人</h1>
-          <p class="ga-lead">使用 AppSecret 模式接入官方 QQ 机器人</p>
-          <div class="ga-card">
-            <label>
-              AppID
-              <input id="qqAppId" spellcheck="false" placeholder="机器人 AppID" />
-            </label>
-            <label>
-              AppSecret
-              <input id="qqAppSecret" type="password" placeholder="机器人 AppSecret" autocomplete="off" />
-            </label>
-            <div class="admin-oauth">
-              <p class="md-switch-title">知识库登录</p>
-              <p class="hint">QQ 没有登录弹窗，请在此用和企业网页相同的方式登录。登录后机器人用此账号检索知识库。</p>
-              <button type="button" id="btnQqOauth" class="animated-button">
-                <span class="arr-2 oauth-icon md-icon" style="--md-icon:url('/icon/symbol/arrow_24dp_1F1F1F_FILL0_wght400_GRAD0_opsz24.svg')" aria-hidden="true"></span>
-                <span class="oauth-x oauth-icon md-icon" style="--md-icon:url('/icon/symbol/close_24dp_1F1F1F_FILL0_wght400_GRAD0_opsz24.svg')" aria-hidden="true"></span>
-                <span class="text">网协认证登陆</span>
-                <span class="circle"></span>
-                <span class="error-wash" aria-hidden="true"></span>
-                <span class="arr-1 oauth-icon md-icon" style="--md-icon:url('/icon/symbol/arrow_24dp_1F1F1F_FILL0_wght400_GRAD0_opsz24.svg')" aria-hidden="true"></span>
-              </button>
-              <button type="button" id="btnQqOauthLogout" class="btn ghost" hidden>退出知识库登录</button>
-              <p class="hint" id="qqOauthStatus" data-oauth-status></p>
-            </div>
-            <div class="md-switch-row">
-              <div>
-                <p class="md-switch-title">启用 QQ 机器人</p>
-                <p class="hint">开启后，用户私聊或在群里 @ 机器人，等同于网页里新建并继续会话。发送「新会话」可再开一轮。</p>
-              </div>
-              <label class="md-switch">
-                <input id="qqEnabled" type="checkbox" />
-                <span class="md-switch-track" aria-hidden="true"></span>
-              </label>
-            </div>
-            <p class="hint">网页用户各自登录；QQ 机器人使用上面这次管理端登录。</p>
-            <div class="row admin-config-actions">
-              <button type="button" id="btnSaveQq" class="btn primary">保存配置</button>
-            </div>
-            <p class="hint" id="qqStatus"></p>
-          </div>
-        </section>
-
-        <section id="page-chats" class="ga-page field-hidden" hidden>
-          <h1>对话记录</h1>
-          <div class="chats-board">
-            <div class="chats-side">
-              <div id="sessionList" class="session-list"></div>
-              <div class="cache-limit-bar">
-                <label for="chatCacheMb">缓存上限</label>
-                <div class="cache-limit-value">
-                  <input id="chatCacheMb" type="number" min="1" max="4096" step="1" />
-                  <span class="cache-limit-unit">MB</span>
-                </div>
-              </div>
-            </div>
-            <div id="chatRecordThread" class="chats-thread thread"></div>
-          </div>
-        </section>
-
-        <section id="page-account" class="ga-page field-hidden" hidden>
-          <h1>管理员账号设置</h1>
-          <p class="ga-lead"></p>
-          <h2 class="ga-title">欢迎 <span id="accountWelcomeName"></span></h2>
-          <div id="adminList" class="ga-admin-list"></div>
-        </section>
-        </div>
-        <div class="ga-main-footer">
-          <button type="button" id="btnAddAdmin" class="btn tonal">注册管理员</button>
-        </div>
-      </main>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>网络服务协会 · 排班管理</title>
+  <link rel="icon" href="/icon/gdutnic.png">
+  <meta name="theme-color" content="#186078">
+  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="/static/schedule.css">
+</head>
+<body data-admin="true">
+<section id="authCard" class="admin-board">
+  <div class="admin-board-left">
+    <div class="admin-logo"><img src="/icon/gdutnic.png" alt="网协标志"></div>
+    <h1 id="authTitle">管理员登录</h1>
+    <p>登录后维护班次与值班人员，查看签到记录。</p>
+  </div>
+  <form id="authForm" method="post" class="admin-board-right">
+    <label class="outlined-field"><input name="username" autocomplete="username" placeholder=" " required><span>用户名</span></label>
+    <label class="outlined-field"><input name="password" type="password" autocomplete="current-password" placeholder=" " required><span>密码</span></label>
+    <p id="authStatus" class="admin-auth-status" role="alert"></p>
+    <button id="authSubmit" class="btn primary">登录</button>
+  </form>
+</section>
+<div id="workspace" class="ga-app is-visible" hidden>
+  <aside class="ga-nav">
+    <div class="ga-brand">
+      <div class="mark"><img src="/icon/gdutnic.png" alt="网协标志"></div>
+      <div><h1>网络服务协会</h1></div>
     </div>
+    <nav>
+      <button type="button" id="dailyTab" class="ga-nav-item active">概览</button>
+      <button type="button" id="weeklyTab" class="ga-nav-item">每周排班</button>
+      <button type="button" id="specialTab" class="ga-nav-item">特殊排班</button>
+      <button type="button" id="membersTab" class="ga-nav-item">用户管理</button>
+      <button type="button" id="fieldTab" class="ga-nav-item">外勤管理</button>
+      <button type="button" id="settingsTab" class="ga-nav-item">其他设置</button>
+    </nav>
+    <div class="panel-footer"><button id="logout" class="btn danger" hidden>退出登录</button></div>
+  </aside>
+  <main class="ga-main">
+    <div class="ga-main-body">
+      <section id="dailyPage">
+        <section class="hero">
+          <div><p class="eyebrow">GDUT NETWORK INFORMATION CENTER</p><h1>概览</h1><p>查看本月出勤情况、当前值班与本周排班。</p></div>
+          <div class="date-box"><label for="month">排班月份</label><input id="month" type="month" required><button id="today" class="btn tonal">回到本月</button></div>
+        </section>
+        <div class="stats overview-stats">
+          <div><strong id="attendanceRate">—</strong><span id="attendanceDetail">本月出勤率（正常 / 总出勤）</span></div>
+          <div><strong id="lateCount">0</strong><span>本月迟到数</span></div>
+          <div><strong id="absentCount">0</strong><span>本月旷班数</span></div>
+        </div>
+        <div class="section-head"><h2>当前值班</h2><div><button id="refresh" class="btn tonal">刷新</button><button id="add" class="btn primary">＋ 新增班次</button></div></div>
+        <div id="shiftTimeline" class="shift-timeline"></div>
+        <p id="status" role="status" aria-live="polite"></p>
+        <section class="section-head week-head"><h2>本周排班</h2><span id="weekRange" class="hint"></span></section>
+        <section id="weekBoard" class="week-board"></section>
+        <section id="shifts" class="shifts" hidden></section>
+      </section>
 
-    <div id="adminDialog" class="ga-dialog" hidden>
-      <div class="ga-dialog-backdrop" id="adminDialogBackdrop"></div>
-      <form id="adminDialogForm" class="ga-dialog-card" role="dialog" aria-labelledby="adminDialogTitle">
-        <h2 id="adminDialogTitle">注册管理员</h2>
-        <label class="outlined-field">
-          <input id="newAdminUser" autocomplete="off" spellcheck="false" placeholder=" " />
-          <span>用户名</span>
-        </label>
-        <label class="outlined-field">
-          <input id="newAdminPass" type="password" autocomplete="new-password" placeholder=" " />
-          <span>密码</span>
-        </label>
-        <p class="admin-auth-status" id="adminDialogStatus"></p>
-        <div class="ga-dialog-actions">
-          <button type="button" class="btn danger" id="btnDialogDelete" hidden>删除</button>
-          <div class="ga-dialog-actions-end">
-            <button type="button" class="btn ghost" id="btnDialogCancel">取消</button>
-            <button type="submit" class="btn primary" id="btnDialogConfirm">确认</button>
+      <section id="weeklyPage" hidden>
+        <div class="hero"><div><h1>每周排班</h1><p>维护周一到周日的固定人员，自动匹配星期，生成到指定日期。</p></div></div>
+        <p class="weekly-notice">已根据图片预填人员草稿，请核对姓名中的生僻字。图片未提供班次时间，填写后才能生成排班；空白人员格表示该日不安排该班。</p>
+        <form id="weeklyForm" method="post">
+          <div class="card weekly-config"><div id="weeklyTimes" class="weekly-times"></div></div>
+          <div class="weekly-table-wrap">
+            <div class="weekly-table-tools">
+              <span>可从 CSV 自动填充人员，模板第一行为星期、第一列为班次，多人与“/”分隔。</span>
+              <div class="actions">
+                <button type="button" id="downloadRoster" class="btn tonal">下载 CSV 模板</button>
+                <button type="button" id="importRoster" class="btn primary">一键导入</button>
+                <input id="rosterFile" type="file" accept=".csv,text/csv,text/plain" hidden>
+              </div>
+            </div>
+            <table class="weekly-table">
+              <caption>每周固定排班表 · 每格一行一位人员</caption>
+              <thead><tr><th scope="col">班次</th><th scope="col">周一</th><th scope="col">周二</th><th scope="col">周三</th><th scope="col">周四</th><th scope="col">周五</th><th scope="col">周六</th><th scope="col">周日</th></tr></thead>
+              <tbody id="weeklyGrid"></tbody>
+            </table>
+          </div>
+          <label class="review-check"><input id="weeklyReviewed" type="checkbox"><span>我已核对人员姓名</span></label>
+          <div class="actions">
+            <button type="submit" class="btn primary">保存每周排班</button>
+            <button type="button" id="clearSchedules" class="btn danger">清除所有排班</button>
+          </div>
+        </form>
+        <div class="card publish-card">
+          <h2>生成排班</h2>
+          <p>从今天起，按已保存的每周固定排班表匹配星期，生成到指定日期（包含当天）。已生成的班次及已有时间冲突的班次会跳过，签到记录会保留。修改每周排班仅影响下次新生成的班次。</p>
+          <form id="publishForm" method="post" class="publish-form">
+            <label for="generateUntil">生成到某日期<input id="generateUntil" type="date" required></label>
+            <button type="submit" class="btn primary">生成排班表</button>
+          </form>
+        </div>
+        <p id="weeklyStatus" role="status" aria-live="polite"></p>
+      </section>
+
+      <section id="specialPage" hidden>
+        <div class="hero">
+          <div><h1>特殊排班</h1><p>单独添加临时班次，可一次安排多位值班人员，保存后可按日期查看并修改。</p></div>
+          <button id="addSpecial" class="btn primary">＋ 新增特殊排班</button>
+        </div>
+        <div class="stats">
+          <div><strong id="specialCount">0</strong><span>个未来特殊班次</span></div>
+          <div><strong id="specialPeople">0</strong><span>人次排班</span></div>
+        </div>
+        <div class="section-head"><h2>未来特殊排班</h2><div><button id="refreshSpecial" class="btn tonal">刷新</button></div></div>
+        <p id="specialStatus" role="status" aria-live="polite"></p>
+        <section id="specialList" class="shifts"></section>
+      </section>
+
+      <section id="membersPage" hidden>
+        <div class="hero">
+          <div><h1>用户管理</h1><p>所有账号统一管理，每个账号带一张权限表。用户名为姓名，新增账号的初始密码为 gg2017。</p></div>
+          <div class="hero-actions">
+            <label class="member-search"><input id="memberSearch" type="search" placeholder="搜索姓名" autocomplete="off" aria-label="搜索用户"></label>
+            <button id="addMember" class="btn primary">添加账号</button>
           </div>
         </div>
-      </form>
+        <p id="membersStatus" role="status" aria-live="polite"></p>
+        <section id="memberList" class="shifts"></section>
+      </section>
+
+      <section id="fieldPage" hidden>
+        <div class="hero">
+          <div><h1>外勤管理</h1><p>查看本月参与外勤的成员，未参与者标红。</p></div>
+          <div class="date-box"><label for="fieldMonth">外勤月份</label><input id="fieldMonth" type="month" required><button id="fieldToday" class="btn tonal">回到本月</button></div>
+        </div>
+        <div class="stats overview-stats">
+          <div><strong id="fieldRegistered">0</strong><span id="fieldSummary">本月已参加外勤</span></div>
+        </div>
+        <p id="fieldAdminStatus" role="status" aria-live="polite"></p>
+        <section id="fieldBoard" class="field-grid"></section>
+      </section>
+
+      <section id="settingsPage" hidden>
+        <div class="hero"><div><h1>其他设置</h1><p>调整值班签到的时间窗口。</p></div></div>
+        <form id="rulesForm" method="post" class="card rules-card">
+          <h2>值班时间</h2>
+          <p class="hint">以下时间均相对于班次开始时间计算。</p>
+          <div class="rules-grid">
+            <label>提前打卡时间（分钟）<input name="early_minutes" type="number" min="0" max="120" step="1" required></label>
+            <label>迟到时间（分钟）<input name="late_minutes" type="number" min="0" max="240" step="1" required></label>
+            <label>旷班时间（分钟）<input name="absent_minutes" type="number" min="1" max="480" step="1" required></label>
+          </div>
+          <p class="hint">三个时间都从班次开始时间起算。提前打卡：开始前多少分钟起显示“确认到岗签到”。迟到：开始后多少分钟内的签到记为迟到。旷班：开始后超过多少分钟仍未签到，或超过该时间才签到，都记为旷班；因此旷班时间必须大于迟到时间。</p>
+          <p id="rulesStatus" role="status" aria-live="polite"></p>
+          <button type="submit" class="btn primary">保存设置</button>
+        </form>
+      </section>
+
+      <dialog id="clearDialog">
+        <form id="clearForm">
+          <div class="section-head"><h2>确认清除所有排班</h2><button type="button" id="closeClear" class="btn tonal">取消</button></div>
+          <p>此操作会删除所有日期的班次及签到记录，<strong>无法撤销</strong>。每周固定排班表和用户账号会保留。</p>
+          <label>请输入“清除所有排班”以确认<input name="confirm" autocomplete="off" placeholder="清除所有排班" required></label>
+          <p id="clearStatus" role="alert"></p>
+          <button type="submit" class="btn danger">确认清除</button>
+        </form>
+      </dialog>
+
+      <dialog id="editor">
+        <form id="shiftForm" method="post">
+          <div class="section-head"><h2 id="editorTitle">新增班次</h2><button type="button" id="closeEditor" class="btn tonal">关闭</button></div>
+          <label>日期<input name="day" type="date" required></label>
+          <div class="two"><label>开始时间<input name="start" type="time" required></label><label>结束时间<input name="end" type="time" required></label></div>
+          <p class="hint">结束早于开始时，表示次日结束。</p>
+          <label>值班人员<textarea name="members" rows="4" placeholder="每行一位姓名，也可用逗号分隔" required></textarea></label>
+          <label>备注<textarea name="note" rows="2" maxlength="500" placeholder="值班事项或交接说明"></textarea></label>
+          <p id="formStatus" role="alert"></p>
+          <button type="submit" class="btn primary">保存班次</button>
+        </form>
+      </dialog>
+
+      <dialog id="detailDialog">
+        <div class="section-head"><h2 id="detailTitle">班次详情</h2><button type="button" id="closeDetail" class="btn tonal">关闭</button></div>
+        <p id="detailMeta" class="hint"></p>
+        <div id="detailMembers" class="detail-members"></div>
+      </dialog>
+
+      <dialog id="permissionDialog">
+        <form id="permissionForm">
+          <div class="section-head"><h2 id="permissionTitle">更改权限</h2><button type="button" id="closePermission" class="btn tonal">关闭</button></div>
+          <p class="hint">勾选该账号可使用的功能组；拥有“更改权限”者才能为他人分配权限。</p>
+          <div id="permissionList" class="permission-list"></div>
+          <p id="permissionStatus" role="alert"></p>
+          <button type="submit" class="btn primary">保存权限</button>
+        </form>
+      </dialog>
+
+      <dialog id="memberPasswordDialog">
+        <form id="memberPasswordForm">
+          <div class="section-head"><h2 id="memberPasswordTitle">更改密码</h2><button type="button" id="closeMemberPassword" class="btn tonal">关闭</button></div>
+          <label>新密码<input name="password" type="password" autocomplete="new-password" minlength="6" maxlength="128" required></label>
+          <p class="hint">保存后该账号的旧登录会立即失效。</p>
+          <p id="memberPasswordStatus" role="alert"></p>
+          <button type="submit" class="btn primary">保存密码</button>
+        </form>
+      </dialog>
+
+      <dialog id="editStatusDialog">
+        <form id="editStatusForm">
+          <div class="section-head"><h2 id="editStatusTitle">更改状态</h2><button type="button" id="closeEditStatus" class="btn tonal">关闭</button></div>
+          <p id="editStatusMeta" class="hint"></p>
+          <div id="editStatusOptions" class="status-options"></div>
+          <p id="editStatusNote" role="alert"></p>
+          <button type="submit" class="btn primary">保存</button>
+        </form>
+      </dialog>
+
+      <dialog id="memberEditor">
+        <form id="memberForm" method="post">
+          <div class="section-head"><h2>添加账号</h2><button type="button" id="closeMember" class="btn tonal">关闭</button></div>
+          <label>姓名<input name="username" maxlength="64" placeholder="值班人员姓名" required></label>
+          <p class="hint">初始密码为 gg2017，用户登录后可自行修改。</p>
+          <p id="memberFormStatus" role="alert"></p>
+          <button type="submit" class="btn primary">创建账号</button>
+        </form>
+      </dialog>
     </div>
-    <script src="/static/markdown.js?v=20260902x"></script>
-    <script src="/static/admin.js?v=20260918a"></script>
-  </body>
+  </main>
+</div>
+<script src="/static/shift-timeline.js"></script>
+<script src="/static/checkin-window.js"></script>
+<script src="/static/schedule.js"></script>
+<script src="/static/status-editor.js"></script>
+<script src="/static/overview.js"></script>
+<script src="/static/weekly.js"></script>
+<script src="/static/weekly-import.js"></script>
+<script src="/static/special.js"></script>
+<script src="/static/members.js"></script>
+<script src="/static/settings.js"></script>
+<script src="/static/field-admin.js"></script>
+</body>
 </html>

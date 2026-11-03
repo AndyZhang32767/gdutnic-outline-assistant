@@ -188,13 +188,7 @@ def save_visitor_chats(visitor_id: str, sessions: list[Any], current_id: str | N
             conn.execute("DELETE FROM visitors WHERE id = ?", (visitor_id,))
             _evict_oldest(conn, _max_mb(conn))
             return
-        conn.execute(
-            """
-            INSERT INTO visitors(id, current_id) VALUES(?, ?)
-            ON CONFLICT(id) DO UPDATE SET current_id = excluded.current_id
-            """,
-            (visitor_id, str(current_id or "")),
-        )
+        db.upsert(conn, "visitors", {"id": visitor_id, "current_id": str(current_id or "")}, ["id"])
         conn.execute("DELETE FROM chats WHERE visitor_id = ?", (visitor_id,))
         for session in cleaned:
             conn.execute(

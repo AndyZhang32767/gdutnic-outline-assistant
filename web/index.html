@@ -1,84 +1,9 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#186078" />
-    <title>Wiki 查询助手</title>
-    <link rel="icon" type="image/png" href="/icon/gdutnic.png" />
-    <link rel="apple-touch-icon" href="/icon/gdutnic.png" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260903f" />
-  </head>
-  <body class="gate-body">
-    <section id="wikiGate" class="wiki-gate">
-      <div class="mark"><img src="/icon/gdutnic.png" alt="" /></div>
-      <h1>欢迎使用网协Wiki助手</h1>
-      <p class="hint" id="gateStatus"></p>
-      <button type="button" id="btnOauth" class="animated-button">
-        <span class="arr-2 oauth-icon md-icon" style="--md-icon:url('/icon/symbol/arrow_24dp_1F1F1F_FILL0_wght400_GRAD0_opsz24.svg')" aria-hidden="true"></span>
-        <span class="oauth-x oauth-icon md-icon" style="--md-icon:url('/icon/symbol/close_24dp_1F1F1F_FILL0_wght400_GRAD0_opsz24.svg')" aria-hidden="true"></span>
-        <span class="text">网协认证登陆</span>
-        <span class="circle"></span>
-        <span class="error-wash" aria-hidden="true"></span>
-        <span class="arr-1 oauth-icon md-icon" style="--md-icon:url('/icon/symbol/arrow_24dp_1F1F1F_FILL0_wght400_GRAD0_opsz24.svg')" aria-hidden="true"></span>
-      </button>
-    </section>
-
-    <div id="app" class="app field-hidden" hidden>
-      <aside class="panel">
-        <header class="brand">
-          <div class="mark"><img src="/icon/gdutnic.png" alt="" /></div>
-          <div>
-            <h1>GDUTNIC Wiki 查询助手</h1>
-            <p class="brand-sub">Wiki 查询助手<span class="ver-chip" title="当前为早期测试版，不代表最终表现">v0.8</span></p>
-          </div>
-        </header>
-
-        <section class="history">
-          <h2>历史会话</h2>
-          <div id="historyList" class="history-list"></div>
-        </section>
-        <div class="panel-footer">
-          <button type="button" id="btnLogout" class="btn danger send" aria-label="登出" title="登出">
-            <span class="md-icon" style="--md-icon:url('/icon/symbol/logout_24dp_1F1F1F_FILL0_wght400_GRAD0_opsz24.svg')" aria-hidden="true"></span>
-          </button>
-          <button type="button" id="btnNewSession" class="btn primary send" aria-label="新建会话" title="新建会话">
-            <span class="md-icon" style="--md-icon:url('/icon/symbol/new_window_24dp_1F1F1F_FILL0_wght400_GRAD0_opsz24.svg')" aria-hidden="true"></span>
-          </button>
-        </div>
-      </aside>
-
-      <button type="button" id="drawerScrim" class="drawer-scrim" hidden aria-label="关闭会话列表"></button>
-      <main class="chat">
-        <header class="chat-bar" id="chatBar">
-          <button type="button" id="btnMenu" class="btn ghost send mobile-only" aria-label="打开会话列表" aria-expanded="false">
-            <span class="menu-bars" aria-hidden="true"></span>
-          </button>
-          <div class="chat-bar-title">
-            <strong id="chatTitle">新会话</strong>
-          </div>
-        </header>
-        <div id="thread" class="thread"></div>
-        <div class="composer-dock" id="composerDock">
-          <div class="composer-blur" aria-hidden="true"></div>
-          <form id="composer" class="composer">
-            <div id="imagePreviews" class="image-previews" hidden></div>
-            <div class="composer-row">
-              <button type="button" id="btnAttach" class="btn ghost send" aria-label="上传图片" title="上传图片">
-                <span class="md-icon" style="--md-icon:url('/icon/symbol/image_24dp_1F1F1F_FILL0_wght400_GRAD0_opsz24.svg')" aria-hidden="true"></span>
-              </button>
-              <input id="imageInput" type="file" accept="image/jpeg,image/png,image/gif,image/webp" multiple hidden />
-              <textarea id="input" rows="1" placeholder="向知识库提问…"></textarea>
-              <button type="submit" id="btnSend" class="btn primary send" aria-label="发送">
-                <span class="md-icon" style="--md-icon:url('/icon/symbol/send_24dp_1F1F1F_FILL0_wght400_GRAD0_opsz24.svg')" aria-hidden="true"></span>
-              </button>
-            </div>
-          </form>
-        </div>
-      </main>
-    </div>
-    <p id="appToast" class="app-toast" hidden role="status"></p>
-    <script src="/static/markdown.js?v=20260903a"></script>
-    <script src="/static/app.js?v=20260903e"></script>
-  </body>
-</html>
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>网络服务协会 · 值班签到</title><link rel="icon" href="/icon/gdutnic.png"><meta name="theme-color" content="#186078"><link rel="stylesheet" href="/static/styles.css"><link rel="stylesheet" href="/static/schedule.css"></head><body data-admin="false" class="auth-pending"><section id="memberAuth" class="admin-board"><div class="admin-board-left"><div class="admin-logo"><img src="/icon/gdutnic.png" alt="网协标志"></div><h1>值班账号登录</h1><p>使用姓名和密码登录，查看排班并完成到岗签到。</p></div><form id="memberLoginForm" method="post" class="admin-board-right"><label class="outlined-field"><input name="username" autocomplete="username" placeholder=" " required><span>姓名</span></label><label class="outlined-field"><input name="password" type="password" autocomplete="current-password" placeholder=" " required><span>密码</span></label><p id="memberLoginStatus" class="admin-auth-status" role="alert"></p><button type="submit" class="btn primary">登录</button></form></section><div id="workspace" class="ga-app is-visible" hidden><aside class="ga-nav"><div class="ga-brand"><div class="mark"><img src="/icon/gdutnic.png" alt="网协标志"></div><div><h1>网络服务协会</h1></div></div><nav><button type="button" id="dutyTab" class="ga-nav-item active">值班签到</button><button type="button" id="fieldTab" class="ga-nav-item">外勤管理</button></nav><div class="panel-footer"><button id="changePassword" class="btn tonal">修改密码</button></div></aside><main class="ga-main"><div class="ga-main-body"><section class="hero member-hero"><div><h1 id="memberGreeting">欢迎回来</h1></div><button id="memberLogout" class="btn danger">退出登录</button></section><section id="dutyPage">
+<div class="section-head"><h2>当日排班</h2><div><button id="refresh" class="btn tonal">刷新</button></div></div><div id="shiftTimeline" class="shift-timeline"></div><p id="status" role="status" aria-live="polite"></p><section id="shifts" class="shifts"></section></section><section id="fieldPage" hidden><div class="stats field-stats"><div><strong id="fieldCount">0</strong><span>本月外勤次数</span></div></div><div class="card field-card"><h2>外勤登记</h2><p class="hint">值班期间参与外勤后，请在此登记。</p><button id="fieldButton" class="animated-button" type="button">
+<svg viewBox="0 0 24 24" class="arr-2" xmlns="http://www.w3.org/2000/svg"><path d="M16.1716 10.9999L10.8076 5.63589L12.2218 4.22168L20 11.9999L12.2218 19.778L10.8076 18.3638L16.1716 12.9999H4V10.9999H16.1716Z"></path></svg>
+<span class="text" id="fieldButtonText">点击登记</span>
+<span class="circle"></span>
+<svg viewBox="0 0 24 24" class="arr-1" xmlns="http://www.w3.org/2000/svg"><path d="M16.1716 10.9999L10.8076 5.63589L12.2218 4.22168L20 11.9999L12.2218 19.778L10.8076 18.3638L16.1716 12.9999H4V10.9999H16.1716Z"></path></svg>
+</button><p id="fieldStatus" role="status" aria-live="polite"></p></div></section></div></main></div><dialog id="passwordEditor"><form id="passwordForm" method="post"><div class="section-head"><h2>修改密码</h2><button type="button" id="closePassword" class="btn tonal">关闭</button></div><label>当前密码<input name="old_password" type="password" autocomplete="current-password" required></label><label>新密码<input name="new_password" type="password" autocomplete="new-password" minlength="6" maxlength="128" required></label><p id="passwordStatus" role="alert"></p><button type="submit" class="btn primary">保存密码</button></form></dialog><script src="/static/shift-timeline.js"></script><script src="/static/checkin-window.js"></script>
+<script src="/static/schedule.js"></script>
+<script src="/static/field-duty.js"></script></body></html>

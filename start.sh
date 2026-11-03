@@ -54,4 +54,4 @@ EOF
   fi
 fi
 
-exec "$PY" -m uvicorn server.app:app --host 0.0.0.0 --port 8787
+exec "$PY" -m uvicorn server.app:app --host 0.0.0.0 --port 50025

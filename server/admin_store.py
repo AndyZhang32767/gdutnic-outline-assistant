@@ -3,12 +3,52 @@ from __future__ import annotations
 import hashlib
 import secrets
 import string
+import threading
 from typing import Any
 
 from server import db
 
 ALPHABET = string.ascii_lowercase + string.digits
 ITERATIONS = 180_000
+
+# Who may act as administrator is checked on every authenticated request. Caching the
+# result avoids re-reading the whole settings table per request; every write below
+# invalidates the cache, so correctness is unchanged.
+_auth_cache: tuple[set[str], str] | None = None
+_auth_lock = threading.Lock()
+
+
+def _invalidate():
+    global _auth_cache
+    with _auth_lock:
+        _auth_cache = None
+
+
+def usernames() -> list[str]:
+    return sorted(_admin_identity()[0])
+
+
+def path() -> str:
+    return _admin_identity()[1]
+
+
+def _admin_identity() -> tuple[set[str], str]:
+    global _auth_cache
+    cached = _auth_cache
+    if cached is not None:
+        return cached
+    with _auth_lock:
+        if _auth_cache is not None:
+            return _auth_cache
+        with db.read() as conn:
+            names = {row["username"] for row in conn.execute("SELECT username FROM users")}
+            stored = db.get_setting(conn, "path", "")
+        if not isinstance(stored, str) or len(stored) != 8:
+            stored = _new_path()
+            with db.write() as conn:
+                db.set_setting(conn, "path", stored)
+        _auth_cache = (names, stored)
+        return _auth_cache
 
 
 def _new_path() -> str:
@@ -91,14 +131,12 @@ def load() -> dict[str, Any]:
             if key not in data[section]:
                 data[section][key] = value
                 dirty = True
-    _ensure_users(data)
     if dirty or not stored_path:
         save(data)
     return data
 
 
 def save(data: dict[str, Any]) -> None:
-    users = _ensure_users(data)
     with db.write() as conn:
         db.set_setting(conn, "path", str(data.get("path") or ""))
         db.set_setting(conn, "username", str(data.get("username") or ""))
@@ -106,40 +144,18 @@ def save(data: dict[str, Any]) -> None:
         db.set_setting(conn, "model", data.get("model") if isinstance(data.get("model"), dict) else {})
         db.set_setting(conn, "mcp", data.get("mcp") if isinstance(data.get("mcp"), dict) else {})
         db.set_setting(conn, "qq", data.get("qq") if isinstance(data.get("qq"), dict) else {})
-        conn.execute("DELETE FROM users")
-        for item in users:
-            name = str(item.get("username") or "").strip()
-            password = str(item.get("password") or "")
-            if name:
-                conn.execute("INSERT INTO users(username, password) VALUES(?, ?)", (name, password))
-
-
-def path() -> str:
-    return load()["path"]
-
-
-def _ensure_users(data: dict[str, Any]) -> list[dict[str, Any]]:
-    users = data.get("users")
-    if not isinstance(users, list):
-        users = []
-    migrated = [
-        {"username": str(item.get("username") or ""), "password": str(item.get("password") or "")}
-        for item in users
-        if isinstance(item, dict)
-    ]
-    name = str(data.get("username") or "").strip()
-    password = str(data.get("password") or "")
-    if name and password and not any(item.get("username") == name for item in migrated):
-        migrated.append({"username": name, "password": password})
-    data["users"] = migrated
-    return migrated
+    _invalidate()
 
 
 def users() -> list[dict[str, Any]]:
-    return list(_ensure_users(load()))
+    return list(load()["users"])
 
 
 def has_user() -> bool:
+    """True once an administrator has been created through the console page."""
+    with db.read() as conn:
+        if db.get_setting(conn, "setup_done", ""):
+            return True
     return any(item.get("username") and item.get("password") for item in users())
 
 
@@ -152,77 +168,73 @@ def _validate_account(username: str, password: str) -> str:
     return name
 
 
+def remember_setup(username: str) -> None:
+    """Mark the console-facing setup as done; login now lives in member accounts."""
+    with db.write() as conn:
+        db.set_setting(conn, "setup_done", str(username))
+    _invalidate()
+
+
 def register(username: str, password: str) -> None:
-    if has_user():
-        raise ValueError("管理员已注册，请直接登录")
-    add_user(username, password)
+    name = _validate_account(username, password)
+    hashed = _hash_password(password)
+    with db.write() as conn:
+        if conn.execute("SELECT username FROM users LIMIT 1").fetchone():
+            raise ValueError("管理员已注册，请直接登录")
+        conn.execute("INSERT INTO users(username,password) VALUES(?,?)", (name, hashed))
+    _invalidate()
 
 
 def add_user(username: str, password: str) -> None:
     name = _validate_account(username, password)
-    data = load()
-    existing = _ensure_users(data)
-    if any(item.get("username") == name for item in existing):
-        raise ValueError("用户名已存在")
-    existing.append({"username": name, "password": _hash_password(password)})
-    if not data.get("username"):
-        data["username"] = name
-        data["password"] = existing[-1]["password"]
-    save(data)
-
-
-def usernames() -> list[str]:
-    return [item["username"] for item in users() if item.get("username")]
+    hashed = _hash_password(password)
+    with db.write() as conn:
+        if conn.execute("SELECT username FROM users WHERE username=?", (name,)).fetchone():
+            raise ValueError("用户名已存在")
+        conn.execute("INSERT INTO users(username,password) VALUES(?,?)", (name, hashed))
+    _invalidate()
 
 
 def update_user(old_username: str, username: str, password: str) -> str:
-    old = old_username.strip()
-    name = username.strip()
+    old, name = old_username.strip(), username.strip()
     if not name or len(name) > 64:
         raise ValueError("请填写用户名")
-    data = load()
-    existing = _ensure_users(data)
-    target = next((item for item in existing if item.get("username") == old), None)
-    if not target:
-        raise ValueError("账号不存在")
-    if name != old and any(item.get("username") == name for item in existing):
-        raise ValueError("用户名已存在")
-    target["username"] = name
-    if password:
-        if len(password) < 6:
-            raise ValueError("密码至少 6 位")
-        target["password"] = _hash_password(password)
-    if data.get("username") == old:
-        data["username"] = name
-        data["password"] = target["password"]
-    save(data)
+    if password and len(password) < 6:
+        raise ValueError("密码至少 6 位")
+    with db.write() as conn:
+        target = conn.execute("SELECT password FROM users WHERE username=?", (old,)).fetchone()
+        if not target:
+            raise ValueError("账号不存在")
+        if name != old and conn.execute("SELECT username FROM users WHERE username=?", (name,)).fetchone():
+            raise ValueError("用户名已存在")
+        conn.execute("UPDATE users SET username=?,password=? WHERE username=?",
+                     (name, _hash_password(password) if password else target["password"], old))
+        # Remove obsolete single-admin fields to avoid resurrecting renamed accounts.
+        db.set_setting(conn, "username", "")
+        db.set_setting(conn, "password", "")
+    _invalidate()
     return name
 
 
 def delete_user(username: str, current_username: str = "") -> None:
     name = username.strip()
-    if current_username and name == current_username.strip():
+    if name == current_username.strip():
         raise ValueError("不能删除当前登录的管理员")
-    data = load()
-    existing = _ensure_users(data)
-    if not any(item.get("username") == name for item in existing):
-        raise ValueError("账号不存在")
-    remaining = [item for item in existing if item.get("username") != name]
-    if not remaining:
-        raise ValueError("不能删除最后一个管理员")
-    data["users"] = remaining
-    if data.get("username") == name:
-        data["username"] = remaining[0]["username"]
-        data["password"] = remaining[0]["password"]
-    save(data)
+    with db.write() as conn:
+        if not conn.execute("SELECT username FROM users WHERE username=?", (name,)).fetchone():
+            raise ValueError("账号不存在")
+        if len(conn.execute("SELECT username FROM users").fetchall()) <= 1:
+            raise ValueError("不能删除最后一个管理员")
+        conn.execute("DELETE FROM users WHERE username=?", (name,))
+        db.set_setting(conn, "username", "")
+        db.set_setting(conn, "password", "")
+    _invalidate()
 
 
 def verify_login(username: str, password: str) -> bool:
-    name = username.strip()
-    for item in users():
-        if item.get("username") == name:
-            return _verify_password(password, item.get("password") or "")
-    return False
+    with db.read() as conn:
+        row = conn.execute("SELECT password FROM users WHERE username=?", (username.strip(),)).fetchone()
+    return bool(row) and _verify_password(password, row["password"])
 
 
 def model_config() -> dict[str, Any]:

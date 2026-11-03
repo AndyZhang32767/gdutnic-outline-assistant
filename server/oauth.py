@@ -141,16 +141,9 @@ async def _get_or_register_client(origin: str, meta: dict[str, Any], redirect_ur
         "client_secret": created.get("client_secret") or "",
     }
     with db.write() as conn:
-        conn.execute(
-            """
-            INSERT INTO oauth_clients(origin, redirect_uri, client_id, client_secret)
-            VALUES(?, ?, ?, ?)
-            ON CONFLICT(origin, redirect_uri) DO UPDATE SET
-              client_id = excluded.client_id,
-              client_secret = excluded.client_secret
-            """,
-            (origin, redirect_uri, rec["client_id"], rec["client_secret"]),
-        )
+        db.upsert(conn, "oauth_clients", dict(origin=origin, redirect_uri=redirect_uri,
+                                             client_id=rec["client_id"], client_secret=rec["client_secret"]),
+                  ["origin", "redirect_uri"])
     return rec
 
 
